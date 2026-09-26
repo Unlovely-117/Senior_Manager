@@ -116,3 +116,18 @@ El equipo debe confirmar framework/lenguaje de frontend y backend, motor de base
 
 ## 11. Entrega por etapas
 La implementación se organiza en cuatro sprints. Cada sprint debe producir un incremento integrado, probado y demostrable, respetando la estructura por capas y los criterios de aceptación acordados por el equipo.
+
+
+## 12. Flujo de revisión y control de calidad (QA)
+
+Responsables de QA definidos por el equipo:
+- Orlando Herrera — orlando.herrera@correounivalle.edu.co
+- David López Restrepo — david.lopez.restrepo@correounivalle.edu.co
+
+Flujo previsto para integrar cambios:
+1. Cada desarrollador trabaja en su rama (`David`, `Alejandro` o `Manuela`) y publica sus cambios.
+2. Se abre un Pull Request dirigido a `main`; no se deben integrar cambios directamente sin revisión.
+3. QA revisa el alcance, los criterios de aceptación, las pruebas y los posibles efectos secundarios.
+4. El Pull Request debe recibir aprobación de QA antes de fusionarse.
+
+**Nota de configuración:** registrar estos correos en la documentación no activa por sí solo la protección de `main` en GitHub. Para configurar revisores obligatorios, GitHub necesita que los usuarios tengan cuenta y acceso al repositorio; normalmente se requiere su nombre de usuario (`@username`) o un equipo de GitHub. La regla de protección también depende de los permisos de administración del repositorio y de las funciones disponibles en el plan.
