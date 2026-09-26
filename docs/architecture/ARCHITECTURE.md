@@ -131,3 +131,14 @@ Flujo previsto para integrar cambios:
 4. El Pull Request debe recibir aprobación de QA antes de fusionarse.
 
 **Nota de configuración:** registrar estos correos en la documentación no activa por sí solo la protección de `main` en GitHub. Para configurar revisores obligatorios, GitHub necesita que los usuarios tengan cuenta y acceso al repositorio; normalmente se requiere su nombre de usuario (`@username`) o un equipo de GitHub. La regla de protección también depende de los permisos de administración del repositorio y de las funciones disponibles en el plan.
+
+
+## 13. Requisitos para Pull Requests
+
+Todo desarrollador que solicite integrar cambios debe abrir un Pull Request (PR) hacia `main` y completar la plantilla `.github/PULL_REQUEST_TEMPLATE.md`. Es obligatorio incluir:
+- una descripción clara de qué se modificó y por qué;
+- el correo institucional de la persona de QA que se solicita como revisora;
+- el usuario de GitHub del revisor, cuando se conozca, para poder solicitarle la revisión desde GitHub;
+- las pruebas realizadas y sus resultados, además de los criterios de aceptación.
+
+Un correo escrito en la descripción del PR sirve para identificar al revisor solicitado, pero no genera automáticamente una solicitud de revisión ni equivale a una aprobación. El equipo debe solicitar la revisión al usuario de GitHub correspondiente y esperar una aprobación formal registrada en el PR antes de fusionar. La plantilla facilita la información; por sí sola no bloquea técnicamente las fusiones. Para imponer el bloqueo se debe activar la protección de rama/reglas de repositorio en GitHub.
