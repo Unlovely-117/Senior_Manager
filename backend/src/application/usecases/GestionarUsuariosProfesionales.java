@@ -60,5 +60,25 @@ public class GestionarUsuariosProfesionales {
         return false;
         // Indica que no se encontró el profesional.
     }
+    public boolean cambiarEstadoProfesional(String documento, boolean activo) {
+        // Busca un profesional por documento para cambiar su estado.
+
+        for (Profesional profesional : profesionales) {
+            // Recorre los profesionales de la lista.
+
+            if (profesional.getDocumento().equals(documento)) {
+                // Comprueba si el documento coincide.
+
+                profesional.setActivo(activo);
+                // Cambia el estado del profesional.
+
+                return true;
+                // Indica que el cambio se realizó correctamente.
+            }
+        }
+        
+        return false;
+        // Indica que no se encontró el profesional.
+    }
 }
-// contiene operaciones relacionadas como el resgistroP y consultaP
+// contiene operaciones relacionadas como el resgistroP, consultaP y si esta o no activo 
