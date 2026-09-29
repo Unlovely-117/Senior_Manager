@@ -2,7 +2,7 @@ package domain.entities;
 
 public class Profesional {
 
-    private String nombre;
+    private String nombre; //guarda los datos n,d,c,t
     private String documento;
     private String correo;
     private String telefono;
@@ -43,5 +43,5 @@ public class Profesional {
     }
     
 }
-
+//“Esta clase representa al profesional y contiene sus datos. Los métodos get permiten consultar los atributos y los métodos set permiten modificarlos.”
 
