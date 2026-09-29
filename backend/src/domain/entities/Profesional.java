@@ -14,4 +14,22 @@ public class Profesional {
         this.telefono = telefono;
     }
 
+    public String getNombre() {
+    return nombre;
+    }
+
+    public String getDocumento() {
+    return documento;
+    }
+
+    public String getCorreo() {
+    return correo;
+    }
+
+    public String getTelefono() {
+    return telefono;
+    }
+    
 }
+
+
