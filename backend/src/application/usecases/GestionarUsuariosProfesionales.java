@@ -24,6 +24,24 @@ public class GestionarUsuariosProfesionales {
     public List<Profesional> consultarProfesionales() { //permite consultar y devuelve lo q este guardado
         return profesionales;
     }
+    
+    public Profesional buscarProfesionalPorDocumento(String documento) {
+    // Busca un profesional usando su documento.
+
+    for (Profesional profesional : profesionales) {
+        // Recorre los profesionales registrados.
+
+        if (profesional.getDocumento().equals(documento)) {
+            // Comprueba si el documento coincide.
+
+            return profesional;
+            // Devuelve el profesional encontrado.
+        }
+    }
+
+    return null;
+    // Indica que no se encontró el profesional.
+}
 
     //recibe los datospara crear P, crea el objeto con esos dat 
     public void crearProfesional(String nombre, String documento, String correo, String telefono) {
