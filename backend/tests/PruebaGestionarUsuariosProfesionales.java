@@ -2,6 +2,7 @@ import java.util.Scanner;
 
 import application.usecases.GestionarUsuariosProfesionales;
 import domain.entities.Profesional;
+import infrastructure.ArchivoProfesionales;
 
 public class PruebaGestionarUsuariosProfesionales {
 
@@ -9,8 +10,10 @@ public class PruebaGestionarUsuariosProfesionales {
 
         Scanner scanner = new Scanner(System.in);
 
+        ArchivoProfesionales repositorio = new ArchivoProfesionales();
+
         GestionarUsuariosProfesionales gestion =
-                new GestionarUsuariosProfesionales();
+        new GestionarUsuariosProfesionales(repositorio);
 
         System.out.println("=== REGISTRO DE PROFESSIONAL ===");
 
@@ -26,12 +29,18 @@ public class PruebaGestionarUsuariosProfesionales {
         System.out.print("Telefono: ");
         String telefono = scanner.nextLine();
 
-        gestion.crearProfesional(
+try {
+
+        gestion.crearProfesional (
                 nombre,
                 documento,
                 correo,
                 telefono
         );
+}catch (IllegalArgumentException e) {
+
+    System.out.println("No se pudo registrar: " + e.getMessage());
+}
 
         System.out.println();
         System.out.println("=== CONSULTAR PROFESSIONAL ===");
@@ -79,6 +88,9 @@ public class PruebaGestionarUsuariosProfesionales {
                         false
                 );
             }
+            
+            // Consultamos nuevamente para mostrar el estado actualizado.
+            profesional = gestion.buscarProfesionalPorDocumento(documentoBusqueda);
 
             System.out.println();
             System.out.println("=== ESTADO ACTUAL ===");
