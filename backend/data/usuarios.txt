@@ -1,1 +1,2 @@
 Wendy;wendyy@123;987654;ADMINISTRADOR;true
+laura123;laura@987;456321;PROFESIONAL;false
