@@ -100,6 +100,11 @@ public class GestionarUsuarios {
     // Cambia el rol de un usuario.
     public boolean cambiarRol(String correo, Rol nuevoRol) {
 
+        //Verificamos que los datos sena validos
+        if (correo == null || correo.isBlank() || nuevoRol == null) {
+            return false;
+        }
+
         // Primero buscamos el usuario.
         Usuario usuario = buscarUsuarioPorCorreo(correo);
 
@@ -186,4 +191,32 @@ public class GestionarUsuarios {
         // Guardamos los cambios en el repositorio.
         return repositorio.actualizar(usuario);
     }
+ // =========================================================
+    // ELIMINAR USUARIO
+    // =========================================================
+
+    // Elimina un usuario utilizando su correo electrónico.
+    public boolean eliminarUsuario(String correo, String contraseña) {
+
+        if (correo == null || correo.isBlank()) {
+            return false;
+        }
+
+        if (contraseña == null || contraseña.isBlank()) {
+            return false;
+        }
+
+        Usuario usuario = buscarUsuarioPorCorreo(correo);
+
+        if (usuario == null) {
+            return false;
+        }
+
+        if (!usuario.getPasswordHash().equals(contraseña)) {
+            return false;
+        }
+
+        return repositorio.eliminar(correo);
+    }
+
 }

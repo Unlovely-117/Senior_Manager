@@ -255,4 +255,70 @@ public class ArchivoUsuarios implements RepositorioUsuarios {
             );
         }
     }
+
+// =========================================================
+    // ELIMINAR USUARIO
+    // =========================================================
+
+    // Elimina un usuario utilizando su correo electrónico.
+    @Override
+    public boolean eliminar(String correo) {
+
+        // Verificamos que el correo sea válido.
+        if (correo == null || correo.isBlank()) {
+            return false;
+        }
+
+        // Obtenemos todos los usuarios almacenados.
+        List<Usuario> usuarios = listar();
+
+        // Buscamos el usuario por su correo.
+        boolean encontrado = false;
+
+        for (int i = 0; i < usuarios.size(); i++) {
+
+            Usuario usuario = usuarios.get(i);
+
+            // Comparamos los correos sin importar mayúsculas o minúsculas.
+            if (usuario.getCorreo().equalsIgnoreCase(correo)) {
+
+                // Eliminamos el usuario de la lista.
+                usuarios.remove(i);
+
+                encontrado = true;
+                break;
+            }
+        }
+
+        // Si no encontramos el usuario, no hacemos cambios.
+        if (!encontrado) {
+            return false;
+        }
+
+        // Reescribimos el archivo con los usuarios restantes.
+        try (BufferedWriter escritor =
+                new BufferedWriter(new FileWriter(archivo))) {
+
+            for (Usuario actual : usuarios) {
+
+                escritor.write(
+                    actual.getNombre() + ";" +
+                    actual.getCorreo() + ";" +
+                    actual.getPasswordHash() + ";" +
+                    actual.getRol().name() + ";" +
+                    actual.isActivo()
+                );
+
+                escritor.newLine();
+            }
+
+            return true;
+
+        } catch (IOException e) {
+
+            throw new RuntimeException(
+                "No se pudo eliminar el usuario.", e
+            );
+        }
+    }
 }

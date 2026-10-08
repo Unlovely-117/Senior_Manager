@@ -2,8 +2,10 @@ import java.util.List;
 import java.util.Scanner;
 
 import application.usecases.GestionarUsuarios;
+
 import domain.entities.Rol;
 import domain.entities.Usuario;
+
 import infrastructure.ArchivoUsuarios;
 
 // Clase utilizada para probar las operaciones de GestionarUsuarios.
@@ -41,7 +43,7 @@ public class PruebaGestionarUsuarios {
         // Por ahora utilizamos un texto de prueba.
         // Más adelante implementaremos almacenamiento seguro
         // mediante hash de contraseña.
-        System.out.print("contraseña de prueba: ");
+        System.out.print("Contraseña de prueba: ");
         String password = scanner.nextLine();
 
         // Mostramos los roles disponibles.
@@ -75,7 +77,9 @@ public class PruebaGestionarUsuarios {
             gestion.registrarUsuario(usuario);
 
             System.out.println();
-            System.out.println("Usuario registrado correctamente.");
+            System.out.println(
+                    "Usuario registrado correctamente."
+            );
 
         } catch (IllegalArgumentException e) {
 
@@ -155,6 +159,7 @@ public class PruebaGestionarUsuarios {
 
             // Pedimos la opción.
             System.out.print("Seleccione una opcion: ");
+
             int opcionEstado =
                     Integer.parseInt(scanner.nextLine());
 
@@ -184,19 +189,79 @@ public class PruebaGestionarUsuarios {
             encontrado =
                     gestion.buscarUsuarioPorCorreo(correoBusqueda);
 
-            System.out.println();
-            System.out.println(
-                    "Estado actual: " +
-                    (encontrado.isActivo()
-                            ? "ACTIVO"
-                            : "INACTIVO")
-            );
+            if (encontrado != null) {
 
+                System.out.println();
+                System.out.println(
+                        "Estado actual: " +
+                        (encontrado.isActivo()
+                                ? "ACTIVO"
+                                : "INACTIVO")
+                );
+            }
         } else {
 
             // Si no existe ningún usuario con ese correo.
             System.out.println(
                     "No se encontro un usuario con ese correo."
+            );
+        }
+
+        // =====================================================
+        // ELIMINAR USUARIO
+        // =====================================================
+
+        System.out.println();
+        System.out.println("=== ELIMINAR USUARIO ===");
+
+        // Pedimos el correo del usuario que queremos eliminar.
+        System.out.print("Ingrese el correo a eliminar: ");
+        String correoEliminar = scanner.nextLine();
+
+        // Pedimos la contraseña del usuario que queremos eliminar.
+        System.out.print("Ingrese la contraseña: ");
+        String contraseñaEliminar = scanner.nextLine();
+
+        // Intentamos eliminar el usuario.
+        boolean eliminado = gestion.eliminarUsuario(correoEliminar, contraseñaEliminar);
+
+        // Mostramos el resultado de la operación.
+        if (eliminado) {
+
+            System.out.println(
+                    "Usuario eliminado correctamente."
+            );
+
+        } else {
+
+            System.out.println(
+                    "No se encontro el usuario."
+            );
+        }
+
+        // =====================================================
+        // VERIFICAR ELIMINACIÓN
+        // =====================================================
+
+        System.out.println();
+        System.out.println("=== VERIFICAR ELIMINACION ===");
+
+        // Buscamos nuevamente el usuario eliminado.
+        Usuario usuarioEliminado =
+                gestion.buscarUsuarioPorCorreo(correoEliminar);
+
+        // Si devuelve null, significa que ya no existe.
+        if (usuarioEliminado == null) {
+
+            System.out.println(
+                    "Verificacion correcta: el usuario ya no existe."
+            );
+
+        } else {
+
+            // Si todavía existe, la eliminación falló.
+            System.out.println(
+                    "ERROR: el usuario todavia existe."
             );
         }
 

@@ -128,43 +128,57 @@ public class ArchivoProfesionales implements RepositorioProfesionales {
 
         return encontrado;
     }
+    // Guarda nuevamente todos los profesionales en el archivo.
+    private void guardarTodos(List<Profesional> profesionales) {
 
-    // Elimina un profesional por su documento.
+    // Abrimos el archivo reemplazando su contenido anterior.
+        try (BufferedWriter escritor =
+            new BufferedWriter(new FileWriter(rutaArchivo))) {
+
+        // Recorremos todos los profesionales recibidos.
+            for (Profesional profesional : profesionales) {
+
+            // Escribimos los datos del profesional.
+            escritor.write(
+                profesional.getNombre() + ";" +
+                profesional.getDocumento() + ";" +
+                profesional.getCorreo() + ";" +
+                profesional.getTelefono() + ";" +
+                profesional.isActivo()
+            );
+
+            // Pasamos a la siguiente línea del archivo.
+            escritor.newLine();
+        }
+
+    } catch (IOException e) {
+
+        // Informamos si ocurrió un problema al guardar.
+        throw new RuntimeException(
+            "No se pudieron guardar los profesionales.",
+            e
+        );
+    }
+}
+    // Elimina un profesional del archivo utilizando su documento.
     @Override
     public boolean eliminar(String documento) {
+     // Obtenemos todos los profesionales guardados.
         List<Profesional> profesionales = listar();
 
+    // Buscamos el profesional cuyo documento coincida.
         boolean eliminado = profesionales.removeIf(
-            profesional -> profesional.getDocumento().equals(documento)
-        );
-
-        if (eliminado) {
-            guardarTodos(profesionales);
-        }
-
-        return eliminado;
-    }
-
-    // Reescribe el archivo conservando todos los profesionales restantes.
-    private void guardarTodos(List<Profesional> profesionales) {
-        prepararArchivo();
-
-        try (BufferedWriter escritor = new BufferedWriter(new FileWriter(rutaArchivo, false))) {
-
-            for (Profesional profesional : profesionales) {
-                escritor.write(
-                    profesional.getNombre() + ";" +
-                    profesional.getDocumento() + ";" +
-                    profesional.getCorreo() + ";" +
-                    profesional.getTelefono() + ";" +
-                    profesional.isActivo()
-                );
-
-                escritor.newLine();
-            }
-
-        } catch (IOException e) {
-            throw new RuntimeException("No se pudieron actualizar los registros.", e);
-        }
+        profesional ->
+            profesional.getDocumento().equalsIgnoreCase(documento)
+    );
+    // Si se encontró el profesional, guardamos nuevamente
+    // la lista sin el profesional eliminado.
+    if (eliminado) {
+    // Reescribimos el archivo con los profesionales restantes.
+        guardarTodos(profesionales);
+}
+    // true significa que se eliminó.
+    // false significa que no existía.
+    return eliminado;
     }
 }
