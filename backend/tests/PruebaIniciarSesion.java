@@ -4,9 +4,9 @@ import application.usecases.IniciarSesion;
 import domain.EncriptadorContrasena;
 import domain.entities.Rol;
 import domain.entities.Sesion;
-import domain.entities.Usuario;
 import infrastructure.ArchivoUsuarios;
 import infrastructure.EncriptadorEquipo;
+import shared.security.PasswordHasher;
 
 // Prueba por consola de HU-1 (iniciar sesión) y HU-2 (cerrar sesión).
 public class PruebaIniciarSesion {
@@ -15,7 +15,8 @@ public class PruebaIniciarSesion {
 
         ArchivoUsuarios repositorio = new ArchivoUsuarios();
         EncriptadorContrasena encriptador = new EncriptadorEquipo();
-        GestionarUsuarios usuarios = new GestionarUsuarios(repositorio);
+        GestionarUsuarios usuarios =
+                new GestionarUsuarios(repositorio, new PasswordHasher());
 
         IniciarSesion iniciarSesion = new IniciarSesion(repositorio, encriptador);
         GestionarSesion gestionSesion = new GestionarSesion(iniciarSesion);
@@ -23,11 +24,10 @@ public class PruebaIniciarSesion {
         String correo = "prueba.login@seniormanage.com";
         String password = "Clave123!";
 
-        // --- Preparación: usuario con contraseña hasheada ---
+        // --- Preparación: el registro hashea la contraseña ---
         if (usuarios.buscarUsuarioPorCorreo(correo) == null) {
-            usuarios.registrarUsuario(new Usuario(
-                    "Usuario Prueba", correo,
-                    encriptador.hashear(password), Rol.PROFESIONAL));
+            usuarios.registrarUsuario(
+                    "Usuario Prueba", correo, password, Rol.PROFESIONAL);
             System.out.println("Usuario de prueba creado.");
         }
 

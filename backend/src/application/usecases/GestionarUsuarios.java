@@ -3,6 +3,7 @@ package application.usecases;
 import domain.RepositorioUsuarios;
 import domain.entities.Rol;
 import domain.entities.Usuario;
+import shared.security.PasswordHasher;
 
 import java.util.List;
 
@@ -24,19 +25,40 @@ public class GestionarUsuarios {
 
     // Repositorio que utilizaremos para guardar y consultar usuarios.
     private final RepositorioUsuarios repositorio;
+    private final PasswordHasher hasher;
 
     // Constructor de la clase.
     //
     // Recibimos el repositorio desde afuera.
     // Esto permite mantener separada la lógica de aplicación
     // de la forma en que realmente se almacenan los datos.
-    public GestionarUsuarios(RepositorioUsuarios repositorio) {
+    public GestionarUsuarios(RepositorioUsuarios repositorio, PasswordHasher hasher) {
         this.repositorio = repositorio;
+        this.hasher = hasher;
     }
 
     // =========================================================
     // REGISTRAR USUARIO
     // =========================================================
+
+    // NUEVO: Registra un usuario recibiendo la contraseña en texto plano.
+    // Primero la convierte en hash con PasswordHasher y luego crea el
+    // Usuario, para que nunca se guarde la contraseña sin proteger.
+    // Es la forma recomendada de registrar, porque así el hash coincide
+    // con el que verifica el inicio de sesión (HU-1).
+    public void registrarUsuario(
+            String nombre,
+            String correo,
+            String passwordPlano,
+            Rol rol) {
+
+        // Generamos el hash seguro de la contraseña.
+        String hash = hasher.generarHash(passwordPlano);
+
+        // Creamos el usuario con el hash y reutilizamos el registro
+        // existente, que valida duplicados y guarda.
+        registrarUsuario(new Usuario(nombre, correo, hash, rol));
+    }
 
     // Registra un nuevo usuario en el sistema.
     public void registrarUsuario(Usuario usuario) {
@@ -212,7 +234,9 @@ public class GestionarUsuarios {
             return false;
         }
 
-        if (!usuario.getPasswordHash().equals(contraseña)) {
+        // CAMBIO: la contraseña guardada es un hash, por lo que ya no se
+        // puede comparar con equals. Se verifica con PasswordHasher.
+        if (!hasher.verificarPassword(contraseña, usuario.getPasswordHash())) {
             return false;
         }
 

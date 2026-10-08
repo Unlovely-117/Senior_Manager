@@ -8,6 +8,9 @@ import domain.entities.Usuario;
 
 import infrastructure.ArchivoUsuarios;
 
+// CAMBIO: import del hasher del equipo.
+import shared.security.PasswordHasher;
+
 // Clase utilizada para probar las operaciones de GestionarUsuarios.
 // Esta clase no pertenece a la aplicación final.
 // Su objetivo es comprobar que el módulo funciona correctamente.
@@ -23,8 +26,11 @@ public class PruebaGestionarUsuarios {
         ArchivoUsuarios repositorio = new ArchivoUsuarios();
 
         // Creamos el caso de uso y le entregamos el repositorio.
+        // CAMBIO: también le entregamos el PasswordHasher, que se usa
+        // para proteger las contraseñas al registrar y para verificarlas
+        // al eliminar.
         GestionarUsuarios gestion =
-                new GestionarUsuarios(repositorio);
+                new GestionarUsuarios(repositorio, new PasswordHasher());
 
         // =====================================================
         // REGISTRO
@@ -40,9 +46,8 @@ public class PruebaGestionarUsuarios {
         System.out.print("Correo: ");
         String correo = scanner.nextLine();
 
-        // Por ahora utilizamos un texto de prueba.
-        // Más adelante implementaremos almacenamiento seguro
-        // mediante hash de contraseña.
+        // CAMBIO: la contraseña se pide en texto plano y
+        // GestionarUsuarios la convierte en hash antes de guardarla.
         System.out.print("Contraseña de prueba: ");
         String password = scanner.nextLine();
 
@@ -63,18 +68,14 @@ public class PruebaGestionarUsuarios {
             rol = Rol.ADMINISTRADOR;
         }
 
-        // Creamos el objeto Usuario.
-        Usuario usuario = new Usuario(
-                nombre,
-                correo,
-                password,
-                rol
-        );
+        // CAMBIO: ya no se crea el Usuario aquí con la contraseña sin
+        // proteger; el registro con hash lo hace GestionarUsuarios.
 
         try {
 
-            // Intentamos registrar el usuario.
-            gestion.registrarUsuario(usuario);
+            // CAMBIO: registramos entregando la contraseña en texto plano;
+            // GestionarUsuarios la hashea y crea el Usuario.
+            gestion.registrarUsuario(nombre, correo, password, rol);
 
             System.out.println();
             System.out.println(
