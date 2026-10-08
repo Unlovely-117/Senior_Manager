@@ -1,0 +1,14 @@
+{
+    "java.project.sourcePaths": [
+        "backend/src",
+        "backend/tests"
+    ],
+    "java.project.testSourcePaths": [
+        "backend/tests"
+    ],
+    "cSpell.words": [
+        "Prueba"
+    ],
+    "cSpell.enabled": false
+
+}
