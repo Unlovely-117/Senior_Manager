@@ -1,2 +1,4 @@
 Wendy;wendyy@123;987654;ADMINISTRADOR;true
 laura123;laura@987;456321;PROFESIONAL;false
+sofia;sofia@369;74856;ADMINISTRADOR;false
+carmensa flores;carmensa.flores@gmail.com;0129;ADMINISTRADOR;true

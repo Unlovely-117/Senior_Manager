@@ -14,7 +14,7 @@ public class GestionarUsuariosProfesionales {
     public GestionarUsuariosProfesionales(RepositorioProfesionales repositorio) {
         this.repositorio = repositorio;
     }
- 
+
     // Registra un profesional si su documento no existe.
     public void registrarProfesional(Profesional profesional) {
 
@@ -90,14 +90,29 @@ public class GestionarUsuariosProfesionales {
 
         return repositorio.actualizar(profesional);
     }
-
-    // Elimina un profesional mediante su documento.
+    // Elimina un profesional utilizando su número de documento.
     public boolean eliminarProfesional(String documento) {
 
-        if (buscarProfesionalPorDocumento(documento) == null) {
-            return false;
-        }
+    // Verificamos que el documento haya sido recibido.
+    if (documento == null || documento.isBlank()) {
 
-        return repositorio.eliminar(documento);
+        // Si está vacío, no se puede realizar la eliminación.
+        return false;
     }
+
+    // Buscamos primero el profesional.
+    Profesional profesional =
+            buscarProfesionalPorDocumento(documento);
+
+    // Si no existe, no podemos eliminarlo.
+    if (profesional == null) {
+
+        // Indicamos que no se encontró el profesional.
+        return false;
+    }
+
+    // Delegamos la eliminación al repositorio.
+    return repositorio.eliminar(documento);
+    }
+
 }
