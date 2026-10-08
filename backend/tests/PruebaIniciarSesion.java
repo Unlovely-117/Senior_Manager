@@ -6,7 +6,7 @@ import domain.entities.Rol;
 import domain.entities.Sesion;
 import domain.entities.Usuario;
 import infrastructure.ArchivoUsuarios;
-import infrastructure.EncriptadorPBKDF2;
+import infrastructure.EncriptadorEquipo;
 
 // Prueba por consola de HU-1 (iniciar sesión) y HU-2 (cerrar sesión).
 public class PruebaIniciarSesion {
@@ -14,7 +14,7 @@ public class PruebaIniciarSesion {
     public static void main(String[] args) {
 
         ArchivoUsuarios repositorio = new ArchivoUsuarios();
-        EncriptadorContrasena encriptador = new EncriptadorPBKDF2();
+        EncriptadorContrasena encriptador = new EncriptadorEquipo();
         GestionarUsuarios usuarios = new GestionarUsuarios(repositorio);
 
         IniciarSesion iniciarSesion = new IniciarSesion(repositorio, encriptador);
