@@ -5,6 +5,11 @@ import domain.entities.Usuario;
 import domain.entities.Rol;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -53,41 +58,15 @@ public class ArchivoUsuarios implements RepositorioUsuarios {
 
     // Guarda un nuevo usuario en el archivo TXT.
     @Override
-    public void guardar(Usuario usuario) {
-
-        // BufferedWriter permite escribir texto en el archivo.
-        // El true en FileWriter significa que agregaremos el usuario
-        // al final del archivo sin borrar los registros anteriores.
-        try (BufferedWriter escritor =
-                new BufferedWriter(new FileWriter(archivo, true))) {
-
-            // Escribimos los datos del usuario separados por ";"
-            // para poder identificarlos posteriormente.
-            escritor.write(
-                usuario.getNombre() + ";" +
-                usuario.getCorreo() + ";" +
-                usuario.getPasswordHash() + ";" +
-                usuario.getRol().name() + ";" +
-                usuario.isActivo()
-            );
-
-            // Después de guardar un usuario,
-            // pasamos a una nueva línea.
-            escritor.newLine();
-
-        } catch (IOException e) {
-
-            // Si ocurre un problema al escribir,
-            // mostramos un mensaje de error.
-            throw new RuntimeException(
-                "No se pudo guardar el usuario.", e
-            );
-        }
+    public synchronized void guardar(Usuario usuario) {
+        List<Usuario> usuarios = listar();
+        usuarios.add(usuario);
+        guardarTodos(usuarios, "No se pudo guardar el usuario.");
     }
 
     // Consulta todos los usuarios almacenados en el archivo.
     @Override
-    public List<Usuario> listar() {
+    public synchronized List<Usuario> listar() {
 
         // Creamos una lista vacía donde iremos almacenando
         // los usuarios encontrados.
@@ -95,7 +74,7 @@ public class ArchivoUsuarios implements RepositorioUsuarios {
 
         // BufferedReader permite leer el archivo línea por línea.
         try (BufferedReader lector =
-                new BufferedReader(new FileReader(archivo))) {
+                Files.newBufferedReader(archivo.toPath(), StandardCharsets.UTF_8)) {
 
             // Variable que almacenará cada línea leída.
             String linea;
@@ -158,7 +137,7 @@ public class ArchivoUsuarios implements RepositorioUsuarios {
 
     // Busca un usuario utilizando su correo electrónico.
     @Override
-    public Usuario buscarPorCorreo(String correo) {
+    public synchronized Usuario buscarPorCorreo(String correo) {
 
         // Si el correo no existe o está vacío,
         // no realizamos la búsqueda.
@@ -187,12 +166,12 @@ public class ArchivoUsuarios implements RepositorioUsuarios {
 
     // Actualiza la información de un usuario existente.
     @Override
-    public boolean actualizar(Usuario usuario) {
+    public synchronized boolean actualizar(Usuario usuario) {
         return actualizar(usuario.getCorreo(), usuario);
     }
 
     @Override
-    public boolean actualizar(String correoActual, Usuario usuario) {
+    public synchronized boolean actualizar(String correoActual, Usuario usuario) {
 
         // Primero obtenemos todos los usuarios actuales.
         List<Usuario> usuarios = listar();
@@ -229,39 +208,8 @@ public class ArchivoUsuarios implements RepositorioUsuarios {
             return false;
         }
 
-        // Si encontramos al usuario,
-        // volvemos a escribir el archivo completo
-        // con la información actualizada.
-        try (BufferedWriter escritor =
-                new BufferedWriter(new FileWriter(archivo))) {
-
-            // Recorremos todos los usuarios.
-            for (Usuario actual : usuarios) {
-
-                // Escribimos nuevamente sus datos en el archivo.
-                escritor.write(
-                    actual.getNombre() + ";" +
-                    actual.getCorreo() + ";" +
-                    actual.getPasswordHash() + ";" +
-                    actual.getRol().name() + ";" +
-                    actual.isActivo()
-                );
-
-                // Pasamos a la siguiente línea.
-                escritor.newLine();
-            }
-
-            // Indicamos que la actualización fue exitosa.
-            return true;
-
-        } catch (IOException e) {
-
-            // Si ocurre un error al escribir el archivo,
-            // informamos el problema.
-            throw new RuntimeException(
-                "No se pudo actualizar el usuario.", e
-            );
-        }
+        guardarTodos(usuarios, "No se pudo actualizar el usuario.");
+        return true;
     }
 
 // =========================================================
@@ -270,7 +218,7 @@ public class ArchivoUsuarios implements RepositorioUsuarios {
 
     // Elimina un usuario utilizando su correo electrónico.
     @Override
-    public boolean eliminar(String correo) {
+    public synchronized boolean eliminar(String correo) {
 
         // Verificamos que el correo sea válido.
         if (correo == null || correo.isBlank()) {
@@ -303,30 +251,43 @@ public class ArchivoUsuarios implements RepositorioUsuarios {
             return false;
         }
 
-        // Reescribimos el archivo con los usuarios restantes.
-        try (BufferedWriter escritor =
-                new BufferedWriter(new FileWriter(archivo))) {
+        guardarTodos(usuarios, "No se pudo eliminar el usuario.");
+        return true;
+    }
 
-            for (Usuario actual : usuarios) {
+    private void guardarTodos(List<Usuario> usuarios, String mensajeError) {
+        StringBuilder contenido = new StringBuilder();
+        for (Usuario usuario : usuarios) {
+            contenido.append(usuario.getNombre()).append(';')
+                .append(usuario.getCorreo()).append(';')
+                .append(usuario.getPasswordHash()).append(';')
+                .append(usuario.getRol().name()).append(';')
+                .append(usuario.isActivo())
+                .append(System.lineSeparator());
+        }
 
-                escritor.write(
-                    actual.getNombre() + ";" +
-                    actual.getCorreo() + ";" +
-                    actual.getPasswordHash() + ";" +
-                    actual.getRol().name() + ";" +
-                    actual.isActivo()
-                );
-
-                escritor.newLine();
+        Path destino = archivo.toPath();
+        Path temporal = null;
+        try {
+            temporal = Files.createTempFile(destino.getParent(), "usuarios-", ".tmp");
+            Files.writeString(temporal, contenido.toString(), StandardCharsets.UTF_8);
+            try {
+                Files.move(temporal, destino,
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException exception) {
+                Files.move(temporal, destino, StandardCopyOption.REPLACE_EXISTING);
             }
-
-            return true;
-
-        } catch (IOException e) {
-
-            throw new RuntimeException(
-                "No se pudo eliminar el usuario.", e
-            );
+        } catch (IOException exception) {
+            throw new RuntimeException(mensajeError, exception);
+        } finally {
+            if (temporal != null) {
+                try {
+                    Files.deleteIfExists(temporal);
+                } catch (IOException exception) {
+                    System.err.println("No se pudo eliminar el archivo temporal de usuarios.");
+                }
+            }
         }
     }
 }

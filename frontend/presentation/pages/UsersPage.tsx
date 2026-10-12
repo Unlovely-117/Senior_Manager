@@ -199,7 +199,7 @@ export const UsersPage: FC<UsersPageProps> = ({ currentUserEmail }) => {
                             <input required maxLength={100} className={inputClass} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
                         </label>
                         <label className="space-y-1.5 text-xs font-semibold text-gray-600">Correo electrónico
-                            <input required type="email" maxLength={120} className={inputClass} value={draft.email} onChange={(event) => setDraft({ ...draft, email: event.target.value })} />
+                            <input required type="email" maxLength={120} autoCapitalize="none" spellCheck={false} className={inputClass} value={draft.email} onChange={(event) => setDraft({ ...draft, email: event.target.value.toLowerCase() })} />
                         </label>
                         {editingEmail === null && (
                             <label className="space-y-1.5 text-xs font-semibold text-gray-600">Contraseña inicial

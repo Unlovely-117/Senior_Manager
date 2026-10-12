@@ -20,8 +20,11 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 
@@ -39,6 +42,35 @@ public final class SeniorManageApiServer {
     private SeniorManageApiServer() throws IOException {
         users = new GestionarUsuarios(new ArchivoUsuarios());
         professionals = new GestionarUsuariosProfesionales(new ArchivoProfesionales());
+    }
+
+    private synchronized boolean eliminarProfesionalCompleto(String documento, Usuario linkedAccount) {
+        Profesional profile = professionals.buscarProfesionalPorDocumento(documento);
+        if (profile == null || !professionals.eliminarProfesional(documento)) {
+            return false;
+        }
+
+        boolean removeAccount = linkedAccount != null
+            && linkedAccount.getRol() == Rol.PROFESIONAL;
+        if (!removeAccount) {
+            return true;
+        }
+
+        try {
+            if (!users.eliminarUsuarioPorCorreo(linkedAccount.getCorreo())) {
+                throw new IllegalStateException("No se pudo eliminar la cuenta profesional vinculada.");
+            }
+        } catch (RuntimeException deletionFailure) {
+            try {
+                professionals.registrarProfesional(profile);
+            } catch (RuntimeException restoreFailure) {
+                deletionFailure.addSuppressed(restoreFailure);
+            }
+            throw deletionFailure;
+        }
+
+        invalidateSessions(linkedAccount.getCorreo());
+        return true;
     }
 
     public static void main(String[] args) throws Exception {
@@ -83,7 +115,12 @@ public final class SeniorManageApiServer {
                         "{\"email\":" + json(session.email)
                         + ",\"name\":" + json(session.name)
                         + ",\"role\":" + json(roleForClient(session.role))
+                        + ",\"mustChangePassword\":" + session.mustChangePassword
                         + "}");
+                    return;
+                }
+                if ("POST".equals(method) && "/api/auth/change-password".equals(path)) {
+                    changePassword(exchange, session);
                     return;
                 }
                 if ("POST".equals(method) && "/api/auth/logout".equals(path)) {
@@ -119,7 +156,7 @@ public final class SeniorManageApiServer {
             return;
         }
         Map<String, String> form = readForm(exchange);
-        String email = required(form, "email");
+        String email = normalizeEmail(required(form, "email"));
         String password = required(form, "password");
         Usuario user = users.autenticarUsuario(email, password);
         if (user == null) {
@@ -128,14 +165,44 @@ public final class SeniorManageApiServer {
         }
 
         String token = newToken();
-        Session session = new Session(token, user.getCorreo(), user.getNombre(), user.getRol());
+        boolean mustChangePassword = passwordHasher.esHashTemporal(user.getPasswordHash());
+        Session session = new Session(
+            token,
+            user.getCorreo(),
+            user.getNombre(),
+            user.getRol(),
+            mustChangePassword
+        );
         sessions.put(token, session);
         sendJson(exchange, 200,
             "{\"token\":" + json(token)
             + ",\"email\":" + json(user.getCorreo())
             + ",\"name\":" + json(user.getNombre())
             + ",\"role\":" + json(roleForClient(user.getRol()))
+            + ",\"mustChangePassword\":" + session.mustChangePassword
             + "}");
+    }
+
+    private void changePassword(HttpExchange exchange, Session session) throws IOException {
+        Map<String, String> form = readForm(exchange);
+        String password = required(form, "password");
+        String confirmation = required(form, "confirmation");
+        if (password.length() < 8) {
+            throw new IllegalArgumentException("La contraseña debe tener al menos 8 caracteres.");
+        }
+        if (!password.equals(confirmation)) {
+            throw new IllegalArgumentException("Las contraseñas no coinciden.");
+        }
+        if (!users.cambiarPassword(session.email, password)) {
+            sendError(exchange, 404, "No se pudo actualizar la contraseña de la cuenta.");
+            return;
+        }
+
+        session.mustChangePassword = false;
+        sessions.entrySet().removeIf(entry ->
+            !entry.getKey().equals(session.token)
+                && entry.getValue().email.equalsIgnoreCase(session.email));
+        sendMessage(exchange, 200, "Contraseña actualizada.");
     }
 
     private void handleProfessionals(
@@ -148,21 +215,52 @@ public final class SeniorManageApiServer {
         }
 
         if (segments.length == 1 && "GET".equals(method)) {
-            sendJson(exchange, 200, serializeProfessionals(professionals.consultarProfesionales()));
+            sendJson(exchange, 200, serializeProfessionalDirectory());
             return;
         }
         if (segments.length == 1 && "POST".equals(method)) {
             Map<String, String> form = readForm(exchange);
-            String name = requiredRecordField(form, "name");
             String document = requiredRecordField(form, "document");
-            String email = validateEmail(requiredRecordField(form, "email"));
+            String email = normalizeEmail(requiredRecordField(form, "email"));
             String phone = requiredRecordField(form, "phone");
+            Usuario account = users.buscarUsuarioPorCorreo(email);
+            if (account == null || account.getRol() != Rol.PROFESIONAL) {
+                sendError(exchange, 409, "Primero crea una cuenta con rol profesional en Usuarios y roles.");
+                return;
+            }
+            if (findProfessionalProfileByEmail(email) != null) {
+                sendError(exchange, 409, "Esta cuenta ya tiene una ficha profesional.");
+                return;
+            }
             if (professionals.buscarProfesionalPorDocumento(document) != null) {
                 sendError(exchange, 409, "Ya existe un profesional con ese documento.");
                 return;
             }
-            professionals.crearProfesional(name, document, email, phone);
-            sendMessage(exchange, 201, "Profesional creado.");
+            Profesional profile = new Profesional(account.getNombre(), document, account.getCorreo(), phone);
+            profile.setActivo(account.isActivo());
+            professionals.registrarProfesional(profile);
+            sendMessage(exchange, 201, "Ficha profesional creada y vinculada a la cuenta.");
+            return;
+        }
+        if (segments.length == 3
+                && "cuenta".equals(segments[1])
+                && "DELETE".equals(method)) {
+            String email = normalizeEmail(decode(segments[2]));
+            Usuario account = users.buscarUsuarioPorCorreo(email);
+            if (account == null || account.getRol() != Rol.PROFESIONAL) {
+                sendError(exchange, 404, "Cuenta profesional no encontrada.");
+                return;
+            }
+            if (findProfessionalProfileByEmail(email) != null) {
+                sendError(exchange, 409, "Elimina la cuenta desde su ficha profesional vinculada.");
+                return;
+            }
+            if (!users.eliminarUsuarioPorCorreo(email)) {
+                sendError(exchange, 404, "No se pudo eliminar la cuenta profesional.");
+                return;
+            }
+            invalidateSessions(email);
+            sendMessage(exchange, 200, "Cuenta profesional eliminada.");
             return;
         }
         if (segments.length >= 2) {
@@ -177,26 +275,177 @@ public final class SeniorManageApiServer {
             } else if (segments.length == 2 && "PUT".equals(method)) {
                 Map<String, String> form = readForm(exchange);
                 String name = requiredRecordField(form, "name");
-                String email = validateEmail(requiredRecordField(form, "email"));
+                String requestedEmail = requiredRecordField(form, "email");
+                String email = requestedEmail.equalsIgnoreCase(existing.getCorreo())
+                    ? existing.getCorreo()
+                    : validateEmail(requestedEmail);
                 String phone = requiredRecordField(form, "phone");
+                Usuario linkedAccount = users.buscarUsuarioPorCorreo(existing.getCorreo());
+                if (linkedAccount != null && linkedAccount.getRol() == Rol.PROFESIONAL) {
+                    name = linkedAccount.getNombre();
+                    email = linkedAccount.getCorreo();
+                }
                 if (professionals.editarProfesional(document, name, email, phone)) {
                     sendMessage(exchange, 200, "Profesional actualizado.");
                 } else {
                     sendError(exchange, 404, "Profesional no encontrado.");
                 }
+            } else if (segments.length == 3 && "cuenta".equals(segments[2]) && "PATCH".equals(method)) {
+                Map<String, String> form = readForm(exchange);
+                String email = normalizeEmail(required(form, "email"));
+                Usuario account = users.buscarUsuarioPorCorreo(email);
+                if (account == null || account.getRol() != Rol.PROFESIONAL) {
+                    sendError(exchange, 409, "Selecciona una cuenta existente con rol profesional.");
+                    return;
+                }
+                if (account.getCorreo().equalsIgnoreCase(existing.getCorreo())) {
+                    sendMessage(exchange, 200, "La ficha ya está vinculada a esta cuenta.");
+                    return;
+                }
+                if (findProfessionalProfileByEmail(email) != null) {
+                    sendError(exchange, 409, "Esta cuenta ya tiene otra ficha profesional vinculada.");
+                    return;
+                }
+                if (!professionals.editarProfesional(
+                        document,
+                        account.getNombre(),
+                        account.getCorreo(),
+                        existing.getTelefono())) {
+                    sendError(exchange, 404, "No se pudo vincular la ficha profesional.");
+                    return;
+                }
+                if (!professionals.cambiarEstadoProfesional(document, account.isActivo())) {
+                    sendError(exchange, 500, "La ficha se vinculó, pero no se pudo sincronizar su estado.");
+                    return;
+                }
+                sendMessage(exchange, 200, "Ficha vinculada a la cuenta profesional.");
             } else if (segments.length == 3 && "estado".equals(segments[2]) && "PATCH".equals(method)) {
                 boolean active = parseBoolean(required(readForm(exchange), "active"));
-                professionals.cambiarEstadoProfesional(document, active);
+                Usuario linkedAccount = users.buscarUsuarioPorCorreo(existing.getCorreo());
+                if (linkedAccount != null && linkedAccount.getRol() == Rol.PROFESIONAL) {
+                    boolean changed = active
+                        ? users.activarUsuario(linkedAccount.getCorreo())
+                        : users.desactivarUsuario(linkedAccount.getCorreo());
+                    if (!changed) {
+                        sendError(exchange, 404, "No se pudo actualizar el estado de la cuenta profesional.");
+                        return;
+                    }
+                    sincronizarFichaProfesional(
+                        linkedAccount.getCorreo(),
+                        users.buscarUsuarioPorCorreo(linkedAccount.getCorreo()));
+                } else if (!professionals.cambiarEstadoProfesional(document, active)) {
+                    sendError(exchange, 404, "No se pudo actualizar el estado de la ficha profesional.");
+                    return;
+                }
                 sendMessage(exchange, 200, "Estado actualizado.");
             } else if (segments.length == 2 && "DELETE".equals(method)) {
-                professionals.eliminarProfesional(document);
-                sendMessage(exchange, 200, "Profesional eliminado.");
+                Usuario linkedAccount = users.buscarUsuarioPorCorreo(existing.getCorreo());
+                if (!eliminarProfesionalCompleto(document, linkedAccount)) {
+                    sendError(exchange, 404, "Ficha profesional no encontrada.");
+                    return;
+                }
+                if (linkedAccount != null && linkedAccount.getRol() == Rol.PROFESIONAL) {
+                    sendMessage(exchange, 200, "Profesional, ficha y cuenta de acceso eliminados.");
+                } else {
+                    sendMessage(exchange, 200, "Ficha profesional eliminada.");
+                }
             } else {
                 sendError(exchange, 405, "Método no permitido.");
             }
             return;
         }
         sendError(exchange, 405, "Método no permitido.");
+    }
+
+    private String serializeProfessionalDirectory() {
+        List<Profesional> profiles = professionals.consultarProfesionales();
+        Set<String> linkedDocuments = new HashSet<>();
+        StringBuilder json = new StringBuilder("[");
+        boolean first = true;
+
+        for (Usuario account : users.listarUsuarios()) {
+            if (account.getRol() != Rol.PROFESIONAL) {
+                continue;
+            }
+            Profesional profile = findProfessionalProfileByEmail(profiles, account.getCorreo());
+            if (profile != null) {
+                linkedDocuments.add(profile.getDocumento());
+            }
+            if (!first) {
+                json.append(',');
+            }
+            json.append(serializeProfessionalAccount(account, profile));
+            first = false;
+        }
+
+        for (Profesional profile : profiles) {
+            if (linkedDocuments.contains(profile.getDocumento())) {
+                continue;
+            }
+            if (!first) {
+                json.append(',');
+            }
+            json.append(serializeUnlinkedProfessionalProfile(profile));
+            first = false;
+        }
+
+        return json.append(']').toString();
+    }
+
+    private Profesional findProfessionalProfileByEmail(String email) {
+        return findProfessionalProfileByEmail(professionals.consultarProfesionales(), email);
+    }
+
+    private Profesional findProfessionalProfileByEmail(List<Profesional> profiles, String email) {
+        for (Profesional profile : profiles) {
+            if (profile.getCorreo().equalsIgnoreCase(email)) {
+                return profile;
+            }
+        }
+        return null;
+    }
+
+    private void sincronizarFichaProfesional(String correoAnterior, Usuario cuenta) {
+        Profesional profile = findProfessionalProfileByEmail(correoAnterior);
+        if (profile == null) {
+            return;
+        }
+
+        if (!professionals.editarProfesional(
+                profile.getDocumento(),
+                cuenta.getNombre(),
+                cuenta.getCorreo(),
+                profile.getTelefono())) {
+            throw new IllegalStateException("No se pudo sincronizar la ficha profesional con la cuenta.");
+        }
+        if (profile.isActivo() != cuenta.isActivo()
+                && !professionals.cambiarEstadoProfesional(
+                    profile.getDocumento(),
+                    cuenta.isActivo())) {
+            throw new IllegalStateException("No se pudo sincronizar el estado de la ficha profesional.");
+        }
+    }
+
+    private String serializeProfessionalAccount(Usuario account, Profesional profile) {
+        return "{\"name\":" + json(account.getNombre())
+            + ",\"document\":" + json(profile == null ? "" : profile.getDocumento())
+            + ",\"email\":" + json(account.getCorreo())
+            + ",\"phone\":" + json(profile == null ? "" : profile.getTelefono())
+            + ",\"active\":" + account.isActivo()
+            + ",\"accountLinked\":true"
+            + ",\"hasProfile\":" + (profile != null)
+            + "}";
+    }
+
+    private String serializeUnlinkedProfessionalProfile(Profesional profile) {
+        return "{\"name\":" + json(profile.getNombre())
+            + ",\"document\":" + json(profile.getDocumento())
+            + ",\"email\":" + json(profile.getCorreo())
+            + ",\"phone\":" + json(profile.getTelefono())
+            + ",\"active\":" + profile.isActivo()
+            + ",\"accountLinked\":false"
+            + ",\"hasProfile\":true"
+            + "}";
     }
 
     private void handleUsers(
@@ -228,7 +477,7 @@ public final class SeniorManageApiServer {
         }
 
         if (segments.length >= 2) {
-            String email = decode(segments[1]);
+            String email = normalizeEmail(decode(segments[1]));
             Usuario existing = users.buscarUsuarioPorCorreo(email);
             if (existing == null) {
                 sendError(exchange, 404, "Usuario no encontrado.");
@@ -241,7 +490,11 @@ public final class SeniorManageApiServer {
                 Map<String, String> form = readForm(exchange);
                 String name = requiredRecordField(form, "name");
                 String newEmail = validateEmail(requiredRecordField(form, "email"));
+                String previousEmail = existing.getCorreo();
                 users.actualizarUsuario(email, name, newEmail);
+                sincronizarFichaProfesional(
+                    previousEmail,
+                    users.buscarUsuarioPorCorreo(newEmail));
                 if (!email.equalsIgnoreCase(newEmail)) {
                     invalidateSessions(email);
                 }
@@ -260,6 +513,7 @@ public final class SeniorManageApiServer {
                     sendError(exchange, 404, "Usuario no encontrado.");
                     return;
                 }
+                sincronizarFichaProfesional(email, users.buscarUsuarioPorCorreo(email));
                 invalidateSessions(email);
                 sendMessage(exchange, 200, "Rol actualizado.");
             } else if (segments.length == 3 && "estado".equals(segments[2]) && "PATCH".equals(method)) {
@@ -277,6 +531,7 @@ public final class SeniorManageApiServer {
                     sendError(exchange, 404, "Usuario no encontrado.");
                     return;
                 }
+                sincronizarFichaProfesional(email, users.buscarUsuarioPorCorreo(email));
                 if (!active) {
                     invalidateSessions(email);
                 }
@@ -289,6 +544,18 @@ public final class SeniorManageApiServer {
                 if (wouldRemoveLastActiveAdministrator(existing, null, false)) {
                     sendError(exchange, 409, "Debe permanecer al menos un administrador activo.");
                     return;
+                }
+                if (existing.getRol() == Rol.PROFESIONAL) {
+                    Profesional linkedProfile = findProfessionalProfileByEmail(email);
+                    if (linkedProfile != null) {
+                        if (!eliminarProfesionalCompleto(linkedProfile.getDocumento(), existing)) {
+                            sendError(exchange, 404, "No se pudo eliminar el profesional y su ficha.");
+                            return;
+                        }
+                        invalidateSessions(email);
+                        sendMessage(exchange, 200, "Profesional, ficha y cuenta de acceso eliminados.");
+                        return;
+                    }
                 }
                 if (!users.eliminarUsuarioPorCorreo(email)) {
                     sendError(exchange, 404, "Usuario no encontrado.");
@@ -336,6 +603,16 @@ public final class SeniorManageApiServer {
             sessions.remove(token);
             sendError(exchange, 401, "La cuenta ya no está habilitada para esta sesión.");
             return null;
+        }
+        if (session.mustChangePassword) {
+            String path = exchange.getRequestURI().getRawPath();
+            boolean allowedPath = "/api/auth/me".equals(path)
+                || "/api/auth/change-password".equals(path)
+                || "/api/auth/logout".equals(path);
+            if (!allowedPath) {
+                sendError(exchange, 403, "Debes cambiar tu contraseña antes de continuar.");
+                return null;
+            }
         }
         return session;
     }
@@ -447,10 +724,15 @@ public final class SeniorManageApiServer {
     }
 
     private String validateEmail(String email) {
-        if (!email.matches("^[^\\s;@]+@[^\\s;@]+\\.[^\\s;@]+$")) {
+        String normalizedEmail = normalizeEmail(email);
+        if (!normalizedEmail.matches("^[^\\s;@]+@[^\\s;@]+\\.[^\\s;@]+$")) {
             throw new IllegalArgumentException("El correo electrónico no es válido.");
         }
-        return email;
+        return normalizedEmail;
+    }
+
+    private String normalizeEmail(String email) {
+        return email.trim().toLowerCase(Locale.ROOT);
     }
 
     private Rol parseRole(String role) {
@@ -563,12 +845,19 @@ public final class SeniorManageApiServer {
         private final String name;
         private final Rol role;
         private final long expiresAt;
+        private volatile boolean mustChangePassword;
 
-        private Session(String token, String email, String name, Rol role) {
+        private Session(
+                String token,
+                String email,
+                String name,
+                Rol role,
+                boolean mustChangePassword) {
             this.token = token;
             this.email = email;
             this.name = name;
             this.role = role;
+            this.mustChangePassword = mustChangePassword;
             this.expiresAt = System.currentTimeMillis() + SESSION_LIFETIME_MS;
         }
     }

@@ -5,11 +5,13 @@ import domain.RepositorioProfesionales;
 import domain.entities.Profesional;
 
 import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -43,34 +45,24 @@ public class ArchivoProfesionales implements RepositorioProfesionales {
 
     // Guarda un profesional nuevo al final del archivo.
     @Override
-    public void guardar(Profesional profesional) {
+    public synchronized void guardar(Profesional profesional) {
         prepararArchivo();
 
-        try (BufferedWriter escritor = new BufferedWriter(new FileWriter(rutaArchivo, true))) {
-
-            escritor.write(
-                profesional.getNombre() + ";" +
-                profesional.getDocumento() + ";" +
-                profesional.getCorreo() + ";" +
-                profesional.getTelefono() + ";" +
-                profesional.isActivo()
-            );
-
-            escritor.newLine();
-
-        } catch (IOException e) {
-            throw new RuntimeException("No se pudo guardar el profesional.", e);
-        }
+        List<Profesional> profesionales = listar();
+        profesionales.add(profesional);
+        guardarTodos(profesionales);
     }
 
     // Lee todos los profesionales almacenados(txt).
     @Override
-    public List<Profesional> listar() {
+    public synchronized List<Profesional> listar() {
         prepararArchivo();
 
         List<Profesional> profesionales = new ArrayList<>();
 
-        try (BufferedReader lector = new BufferedReader(new FileReader(rutaArchivo))) {
+        try (BufferedReader lector = Files.newBufferedReader(
+                Path.of(rutaArchivo),
+                StandardCharsets.UTF_8)) {
 
             String linea;
 
@@ -99,7 +91,7 @@ public class ArchivoProfesionales implements RepositorioProfesionales {
 
     // Busca un profesional por su documento.
     @Override
-    public Profesional buscarPorDocumento(String documento) {
+    public synchronized Profesional buscarPorDocumento(String documento) {
         for (Profesional profesional : listar()) {
             if (profesional.getDocumento().equals(documento)) {
                 return profesional;
@@ -111,7 +103,7 @@ public class ArchivoProfesionales implements RepositorioProfesionales {
 
     // Actualiza los datos de un profesional sin borrar los demás.
     @Override
-    public boolean actualizar(Profesional profesionalActualizado) {
+    public synchronized boolean actualizar(Profesional profesionalActualizado) {
         List<Profesional> profesionales = listar();
         boolean encontrado = false;
 
@@ -133,39 +125,48 @@ public class ArchivoProfesionales implements RepositorioProfesionales {
     }
     // Guarda nuevamente todos los profesionales en el archivo.
     private void guardarTodos(List<Profesional> profesionales) {
-
-    // Abrimos el archivo reemplazando su contenido anterior.
-        try (BufferedWriter escritor =
-            new BufferedWriter(new FileWriter(rutaArchivo))) {
-
-        // Recorremos todos los profesionales recibidos.
-            for (Profesional profesional : profesionales) {
-
-            // Escribimos los datos del profesional.
-            escritor.write(
-                profesional.getNombre() + ";" +
-                profesional.getDocumento() + ";" +
-                profesional.getCorreo() + ";" +
-                profesional.getTelefono() + ";" +
-                profesional.isActivo()
-            );
-
-            // Pasamos a la siguiente línea del archivo.
-            escritor.newLine();
+        StringBuilder contenido = new StringBuilder();
+        for (Profesional profesional : profesionales) {
+            contenido.append(profesional.getNombre()).append(';')
+                .append(profesional.getDocumento()).append(';')
+                .append(profesional.getCorreo()).append(';')
+                .append(profesional.getTelefono()).append(';')
+                .append(profesional.isActivo())
+                .append(System.lineSeparator());
         }
 
-    } catch (IOException e) {
-
-        // Informamos si ocurrió un problema al guardar.
-        throw new RuntimeException(
-            "No se pudieron guardar los profesionales.",
-            e
-        );
+        reemplazarArchivo(contenido.toString(), "No se pudieron guardar los profesionales.");
     }
-}
+
+    private void reemplazarArchivo(String contenido, String mensajeError) {
+        Path destino = Path.of(rutaArchivo);
+        Path temporal = null;
+        try {
+            temporal = Files.createTempFile(destino.getParent(), "profesionales-", ".tmp");
+            Files.writeString(temporal, contenido, StandardCharsets.UTF_8);
+            try {
+                Files.move(temporal, destino,
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException exception) {
+                Files.move(temporal, destino, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException exception) {
+            throw new RuntimeException(mensajeError, exception);
+        } finally {
+            if (temporal != null) {
+                try {
+                    Files.deleteIfExists(temporal);
+                } catch (IOException exception) {
+                    System.err.println("No se pudo eliminar el archivo temporal de profesionales.");
+                }
+            }
+        }
+    }
+
     // Elimina un profesional del archivo utilizando su documento.
     @Override
-    public boolean eliminar(String documento) {
+    public synchronized boolean eliminar(String documento) {
      // Obtenemos todos los profesionales guardados.
         List<Profesional> profesionales = listar();
 

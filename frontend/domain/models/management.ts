@@ -5,6 +5,7 @@ export interface AuthenticatedUser {
     email: string;
     name: string;
     role: AccountRole;
+    mustChangePassword: boolean;
 }
 
 export interface Professional {
@@ -13,6 +14,8 @@ export interface Professional {
     email: string;
     phone: string;
     active: boolean;
+    accountLinked: boolean;
+    hasProfile: boolean;
 }
 
 export interface UserAccount {

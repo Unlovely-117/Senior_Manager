@@ -1,8 +1,11 @@
 export {
+    changePassword,
     createProfessional,
     createUser,
     deleteProfessional,
+    deleteProfessionalAccount,
     deleteUser,
+    linkProfessional,
     listProfessionals,
     listUsers,
     restoreSession,

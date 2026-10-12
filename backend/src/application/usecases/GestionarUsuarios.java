@@ -51,7 +51,8 @@ public class GestionarUsuarios {
 
         String storedPassword = usuario.getPasswordHash();
         boolean validPassword;
-        if (storedPassword.startsWith("PBKDF2-SHA256$")) {
+        if (storedPassword.startsWith("PBKDF2-SHA256$")
+                || passwordHasher.esHashTemporal(storedPassword)) {
             validPassword = passwordHasher.verificarPassword(password, storedPassword);
         } else {
             validPassword = MessageDigest.isEqual(
@@ -65,6 +66,20 @@ public class GestionarUsuarios {
         }
 
         return validPassword ? usuario : null;
+    }
+
+    public boolean cambiarPassword(String correo, String password) {
+        if (correo == null || correo.isBlank() || password == null || password.isBlank()) {
+            return false;
+        }
+
+        Usuario usuario = repositorio.buscarPorCorreo(correo);
+        if (usuario == null || !usuario.isActivo()) {
+            return false;
+        }
+
+        usuario.cambiarPasswordHash(passwordHasher.generarHash(password));
+        return repositorio.actualizar(usuario);
     }
 
     // =========================================================

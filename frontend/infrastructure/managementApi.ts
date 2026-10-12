@@ -1,7 +1,11 @@
-﻿import type { AuthenticatedUser, Professional, UserAccount } from '../domain/models/management';
+import type { AccountRole, AuthenticatedUser, Professional, UserAccount } from '../domain/models/management';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8080/api').replace(/\/$/, '');
 const TOKEN_KEY = 'senior-manage-session-token';
+
+function normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
+}
 
 interface ApiMessage {
     message?: string;
@@ -50,7 +54,7 @@ async function request<T>(
 export async function signIn(email: string, password: string): Promise<AuthenticatedUser> {
     const user = await request<AuthenticatedUser>('/auth/login', {
         method: 'POST',
-        values: { email, password },
+        values: { email: normalizeEmail(email), password },
         authenticated: false,
     });
     sessionStorage.setItem(TOKEN_KEY, user.token);
@@ -72,16 +76,33 @@ export async function signOut(): Promise<void> {
     }
 }
 
+export async function changePassword(password: string, confirmation: string): Promise<void> {
+    await request<ApiMessage>('/auth/change-password', {
+        method: 'POST',
+        values: { password, confirmation },
+    });
+}
+
 export function listProfessionals(): Promise<Professional[]> {
     return request('/profesionales');
 }
 
-export async function createProfessional(values: Omit<Professional, 'active'>): Promise<void> {
-    await request<ApiMessage>('/profesionales', { method: 'POST', values });
+export async function createProfessional(values: { document: string; email: string; phone: string }): Promise<void> {
+    await request<ApiMessage>('/profesionales', { method: 'POST', values: { ...values, email: normalizeEmail(values.email) } });
 }
 
-export async function updateProfessional(document: string, values: Omit<Professional, 'document' | 'active'>): Promise<void> {
-    await request<ApiMessage>(`/profesionales/${encodeURIComponent(document)}`, { method: 'PUT', values });
+export async function updateProfessional(document: string, values: { name: string; email: string; phone: string }): Promise<void> {
+    await request<ApiMessage>(`/profesionales/${encodeURIComponent(document)}`, {
+        method: 'PUT',
+        values: { ...values, email: normalizeEmail(values.email) },
+    });
+}
+
+export async function linkProfessional(document: string, email: string): Promise<void> {
+    await request<ApiMessage>(`/profesionales/${encodeURIComponent(document)}/cuenta`, {
+        method: 'PATCH',
+        values: { email: normalizeEmail(email) },
+    });
 }
 
 export async function setProfessionalStatus(document: string, active: boolean): Promise<void> {
@@ -95,16 +116,25 @@ export async function deleteProfessional(document: string): Promise<void> {
     await request<ApiMessage>(`/profesionales/${encodeURIComponent(document)}`, { method: 'DELETE' });
 }
 
+export async function deleteProfessionalAccount(email: string): Promise<void> {
+    await request<ApiMessage>(`/profesionales/cuenta/${encodeURIComponent(normalizeEmail(email))}`, {
+        method: 'DELETE',
+    });
+}
+
 export function listUsers(): Promise<UserAccount[]> {
     return request('/usuarios');
 }
 
 export async function createUser(values: { name: string; email: string; password: string; role: AccountRole }): Promise<void> {
-    await request<ApiMessage>('/usuarios', { method: 'POST', values });
+    await request<ApiMessage>('/usuarios', { method: 'POST', values: { ...values, email: normalizeEmail(values.email) } });
 }
 
 export async function updateUser(email: string, values: { name: string; email: string }): Promise<void> {
-    await request<ApiMessage>(`/usuarios/${encodeURIComponent(email)}`, { method: 'PUT', values });
+    await request<ApiMessage>(`/usuarios/${encodeURIComponent(normalizeEmail(email))}`, {
+        method: 'PUT',
+        values: { ...values, email: normalizeEmail(values.email) },
+    });
 }
 
 export async function setUserRole(email: string, role: AccountRole): Promise<void> {
@@ -121,4 +151,3 @@ export async function setUserStatus(email: string, active: boolean): Promise<voi
 export async function deleteUser(email: string): Promise<void> {
     await request<ApiMessage>(`/usuarios/${encodeURIComponent(email)}`, { method: 'DELETE' });
 }
-
