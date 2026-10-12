@@ -14,7 +14,10 @@ import java.util.List;
 public class ArchivoUsuarios implements RepositorioUsuarios {
 
     // Ubicación donde se almacenarán los usuarios.
-    private final File archivo = new File("backend/data/usuarios.txt");
+    private final File archivo = new File(
+        System.getProperty("senior.manage.dataDir", "backend/data"),
+        "usuarios.txt"
+    );
 
     // Constructor de la clase.
     // Se ejecuta cuando creamos un ArchivoUsuarios.
@@ -185,6 +188,11 @@ public class ArchivoUsuarios implements RepositorioUsuarios {
     // Actualiza la información de un usuario existente.
     @Override
     public boolean actualizar(Usuario usuario) {
+        return actualizar(usuario.getCorreo(), usuario);
+    }
+
+    @Override
+    public boolean actualizar(String correoActual, Usuario usuario) {
 
         // Primero obtenemos todos los usuarios actuales.
         List<Usuario> usuarios = listar();
@@ -197,10 +205,10 @@ public class ArchivoUsuarios implements RepositorioUsuarios {
         for (int i = 0; i < usuarios.size(); i++) {
 
             // Comparamos el correo del usuario almacenado
-            // con el correo del usuario que queremos actualizar.
+            // con el correo que tenía antes de la edición.
             if (usuarios.get(i)
                     .getCorreo()
-                    .equalsIgnoreCase(usuario.getCorreo())) {
+                    .equalsIgnoreCase(correoActual)) {
 
                 // Reemplazamos el usuario anterior
                 // por la versión actualizada.

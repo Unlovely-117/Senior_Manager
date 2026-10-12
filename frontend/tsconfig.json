@@ -17,10 +17,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": false,
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"]
-    }
+    "ignoreDeprecations": "5.0"
   },
-  "include": ["src"]
+  "include": ["main.tsx", "presentation/**/*", "vite.config.ts"]
 }

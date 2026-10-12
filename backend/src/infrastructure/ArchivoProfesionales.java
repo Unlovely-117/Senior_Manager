@@ -16,7 +16,10 @@ import java.util.List;
 // Implementa el almacenamiento de profesionales mediante un archivo TXT.
 public class ArchivoProfesionales implements RepositorioProfesionales {
 
-    private final String rutaArchivo = "backend/data/profesionales.txt";
+    private final String rutaArchivo = new File(
+        System.getProperty("senior.manage.dataDir", "backend/data"),
+        "profesionales.txt"
+    ).getPath();
 
     // Crea el archivo(txt) si todavía no existe.
     private void prepararArchivo() {

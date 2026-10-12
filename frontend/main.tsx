@@ -1,15 +1,12 @@
+/// <reference types="vite/client" />
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './presentation/App';
+import { AppRouter } from './presentation/routes/AppRouter';
+import './presentation/styles/global.css';
 
-const rootElement = document.getElementById('root');
-
-if (!rootElement) {
-  throw new Error("No se encontró el elemento 'root' en el index.html");
-}
-
-ReactDOM.createRoot(rootElement).render(
+ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
-  </React.StrictMode>,
+    <AppRouter />
+  </React.StrictMode>
 );

@@ -3,7 +3,10 @@ package application.usecases;
 import domain.RepositorioUsuarios;
 import domain.entities.Rol;
 import domain.entities.Usuario;
+import shared.security.PasswordHasher;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 
 // Esta clase contiene los casos de uso relacionados con la gestión de usuarios.
@@ -24,6 +27,7 @@ public class GestionarUsuarios {
 
     // Repositorio que utilizaremos para guardar y consultar usuarios.
     private final RepositorioUsuarios repositorio;
+    private final PasswordHasher passwordHasher;
 
     // Constructor de la clase.
     //
@@ -32,6 +36,35 @@ public class GestionarUsuarios {
     // de la forma en que realmente se almacenan los datos.
     public GestionarUsuarios(RepositorioUsuarios repositorio) {
         this.repositorio = repositorio;
+        this.passwordHasher = new PasswordHasher();
+    }
+
+    public Usuario autenticarUsuario(String correo, String password) {
+        if (correo == null || correo.isBlank() || password == null || password.isBlank()) {
+            return null;
+        }
+
+        Usuario usuario = repositorio.buscarPorCorreo(correo);
+        if (usuario == null || !usuario.isActivo()) {
+            return null;
+        }
+
+        String storedPassword = usuario.getPasswordHash();
+        boolean validPassword;
+        if (storedPassword.startsWith("PBKDF2-SHA256$")) {
+            validPassword = passwordHasher.verificarPassword(password, storedPassword);
+        } else {
+            validPassword = MessageDigest.isEqual(
+                password.getBytes(StandardCharsets.UTF_8),
+                storedPassword.getBytes(StandardCharsets.UTF_8)
+            );
+            if (validPassword) {
+                usuario.cambiarPasswordHash(passwordHasher.generarHash(password));
+                repositorio.actualizar(usuario);
+            }
+        }
+
+        return validPassword ? usuario : null;
     }
 
     // =========================================================
@@ -182,6 +215,11 @@ public class GestionarUsuarios {
             return false;
         }
 
+        if (!correoActual.equalsIgnoreCase(nuevoCorreo)
+                && buscarUsuarioPorCorreo(nuevoCorreo) != null) {
+            throw new IllegalArgumentException("Ya existe un usuario con ese correo.");
+        }
+
         // Cambiamos el nombre del usuario.
         usuario.cambiarNombre(nuevoNombre);
 
@@ -189,7 +227,7 @@ public class GestionarUsuarios {
         usuario.cambiarCorreo(nuevoCorreo);
 
         // Guardamos los cambios en el repositorio.
-        return repositorio.actualizar(usuario);
+        return repositorio.actualizar(correoActual, usuario);
     }
  // =========================================================
     // ELIMINAR USUARIO
@@ -212,10 +250,17 @@ public class GestionarUsuarios {
             return false;
         }
 
-        if (!usuario.getPasswordHash().equals(contraseña)) {
+        if (autenticarUsuario(correo, contraseña) == null) {
             return false;
         }
 
+        return repositorio.eliminar(correo);
+    }
+
+    public boolean eliminarUsuarioPorCorreo(String correo) {
+        if (correo == null || correo.isBlank()) {
+            return false;
+        }
         return repositorio.eliminar(correo);
     }
 

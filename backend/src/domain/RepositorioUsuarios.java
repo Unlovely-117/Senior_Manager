@@ -18,6 +18,9 @@ public interface RepositorioUsuarios {
     // Actualiza los datos de un usuario existente.
     boolean actualizar(Usuario usuario);
 
-    // Elimina un usuario utilizando su contraseña.
-    boolean eliminar(String contraseña);
+    // Actualiza una cuenta identificada por su correo actual.
+    boolean actualizar(String correoActual, Usuario usuario);
+
+    // Elimina un usuario utilizando su correo electrónico.
+    boolean eliminar(String correo);
 }
