@@ -1,4 +1,4 @@
-﻿# Senior-Manage
+# Senior-Manage
 
 Aplicación web para que administradores y profesionales coordinen atención, pacientes, asignaciones, citas, ejercicios y fichas profesionales.
 
