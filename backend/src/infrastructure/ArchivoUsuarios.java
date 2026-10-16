@@ -256,7 +256,67 @@ public class ArchivoUsuarios implements RepositorioUsuarios {
         }
     }
 
-// =========================================================
+    // Actualiza un usuario identificando la cuenta por su correo actual.
+    @Override
+    public boolean actualizar(String correoActual, Usuario usuario) {
+
+        // Verificamos que el correo actual sea válido.
+        if (correoActual == null || correoActual.isBlank()) {
+            return false;
+        }
+
+        // Obtenemos todos los usuarios almacenados.
+        List<Usuario> usuarios = listar();
+
+        // Buscamos el usuario por su correo actual.
+        boolean encontrado = false;
+
+        for (int i = 0; i < usuarios.size(); i++) {
+
+            // Comparamos el correo almacenado con el correo actual.
+            if (usuarios.get(i).getCorreo().equalsIgnoreCase(correoActual)) {
+
+                // Reemplazamos el usuario anterior por la versión actualizada.
+                usuarios.set(i, usuario);
+
+                encontrado = true;
+                break;
+            }
+        }
+
+        // Si no encontramos el usuario, no hacemos cambios.
+        if (!encontrado) {
+            return false;
+        }
+
+        // Reescribimos el archivo con los usuarios actualizados.
+        try (BufferedWriter escritor =
+                new BufferedWriter(new FileWriter(archivo))) {
+
+            for (Usuario actual : usuarios) {
+
+                escritor.write(
+                    actual.getNombre() + ";" +
+                    actual.getCorreo() + ";" +
+                    actual.getPasswordHash() + ";" +
+                    actual.getRol().name() + ";" +
+                    actual.isActivo()
+                );
+
+                escritor.newLine();
+            }
+
+            return true;
+
+        } catch (IOException e) {
+
+            throw new RuntimeException(
+                "No se pudo actualizar el usuario.", e
+            );
+        }
+    }
+
+    // =========================================================
     // ELIMINAR USUARIO
     // =========================================================
 
