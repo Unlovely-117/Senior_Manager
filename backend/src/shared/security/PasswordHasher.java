@@ -11,6 +11,8 @@ import javax.crypto.spec.PBEKeySpec;
 // en valores seguros antes de almacenarlas.
 public class PasswordHasher {
 
+    private static final String TEMPORARY_PASSWORD_PREFIX = "TEMPORARY$";
+
     // Cantidad de iteraciones utilizadas por PBKDF2.
     // Entre más iteraciones, más difícil resulta atacar el hash.
     private static final int ITERACIONES = 65536;
@@ -87,6 +89,15 @@ public class PasswordHasher {
         }
     }
 
+    public String generarHashTemporal(String password) {
+        return TEMPORARY_PASSWORD_PREFIX + generarHash(password);
+    }
+
+    public boolean esHashTemporal(String hashAlmacenado) {
+        return hashAlmacenado != null
+            && hashAlmacenado.startsWith(TEMPORARY_PASSWORD_PREFIX);
+    }
+
     // Verifica si una contraseña coincide con un hash almacenado.
     public boolean verificarPassword(
             String password,
@@ -95,6 +106,10 @@ public class PasswordHasher {
         // Validamos los datos recibidos.
         if (password == null || hashAlmacenado == null) {
             return false;
+        }
+
+        if (esHashTemporal(hashAlmacenado)) {
+            hashAlmacenado = hashAlmacenado.substring(TEMPORARY_PASSWORD_PREFIX.length());
         }
 
         // Separamos las partes almacenadas.

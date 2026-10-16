@@ -1,9 +1,12 @@
 
 package domain.entities;
 
+import java.util.UUID;
+
 // Representa una cuenta de acceso a Senior-Manage.
 public class Usuario {
 
+    private final UUID id;
     private String nombre;
     private String correo;
     private String passwordHash;
@@ -12,6 +15,13 @@ public class Usuario {
 
     //constuctor
     public Usuario(String nombre, String correo, String passwordHash, Rol rol) {
+        this(UUID.randomUUID(), nombre, correo, passwordHash, rol);
+    }
+
+    public Usuario(UUID id, String nombre, String correo, String passwordHash, Rol rol) {
+        if (id == null) {
+            throw new IllegalArgumentException("El identificador del usuario es obligatorio.");
+        }
         //validacion de constuctor
         if (nombre == null || nombre.isBlank()) {
             throw new IllegalArgumentException("El nombre es obligatorio.");
@@ -30,6 +40,7 @@ public class Usuario {
         }
 
         //asignacion de valores a los atributos
+        this.id = id;
         this.nombre = nombre;
         this.correo = correo;
         this.passwordHash = passwordHash;
@@ -40,6 +51,10 @@ public class Usuario {
     //getter permite consultar el valor de un atributo y setteer modifica el valor del atributo
     public String getNombre() {
         return nombre;
+    }
+
+    public UUID getId() {
+        return id;
     }
 
     public String getCorreo() {

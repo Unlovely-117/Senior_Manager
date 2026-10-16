@@ -3,6 +3,7 @@ package domain;
 
 import domain.entities.Profesional;
 import java.util.List;
+import java.util.UUID;
 
 // Define las operaciones de almacenamiento de p.
 public interface RepositorioProfesionales {
@@ -15,6 +16,19 @@ public interface RepositorioProfesionales {
 
     // Busca un profesional por su documento.
     Profesional buscarPorDocumento(String documento);
+
+    default Profesional buscarPorId(UUID id) {
+        if (id == null) return null;
+        return listar().stream().filter(profesional -> id.equals(profesional.getId())).findFirst().orElse(null);
+    }
+
+    default Profesional buscarPorCuentaId(UUID accountId) {
+        return null;
+    }
+
+    default boolean vincularCuenta(String documento, UUID accountId) {
+        return false;
+    }
 
     // Actualiza los datos de un profesional existente.
     boolean actualizar(Profesional profesional);
