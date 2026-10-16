@@ -64,12 +64,12 @@ Si no recuerdas la contrasena de ninguna cuenta administradora, ejecuta `backend
 
 En desarrollo, Vite reenvia `/api` al backend local en `http://127.0.0.1:8080`, de modo que funciona aunque Vite elija un puerto distinto de 5173. En produccion, define `VITE_API_URL` con la URL publica de la API y configura el origen permitido del frontend en el servidor.
 
-## OperaciÃ³n actual y persistencia (2026-10-16)
+## Operacion actual y persistencia (2026-10-16)
 
-- La API se conecta Ãºnicamente a PostgreSQL usando `SENIOR_MANAGE_JDBC_URL`, `SENIOR_MANAGE_DB_USERNAME` y `SENIOR_MANAGE_DB_PASSWORD`. No hay una base de datos fÃ­sica dentro de este repositorio ni valores de conexiÃ³n predeterminados.
+- La API se conecta Ãºnicamente a PostgreSQL usando `SENIOR_MANAGE_JDBC_URL`, `SENIOR_MANAGE_DB_USERNAME` y `SENIOR_MANAGE_DB_PASSWORD`. No hay una base de datos basica dentro de este repositorio ni valores de conexion predeterminados.
 - Para localizar los archivos de datos del servidor ejecuta en PostgreSQL `SHOW data_directory;`. La base lÃ³gica, host y puerto se obtienen de la URL JDBC configurada para el proceso de la API.
 - Java 17 y Maven son requisitos. Aplica V1â€“V5 y la matriz de permisos segÃºn las guÃ­as enlazadas arriba antes de arrancar el servidor.
-- HistÃ³ricamente se almacenaron usuarios/profesionales en TXT. Esa persistencia fue migrada a PostgreSQL. Se retiraron los TXT de datos y sus repositorios; la herramienta puntual de importación ya se retiró tras completar la migración.
+- Historicamente se almacenaron usuarios/profesionales en TXT. Esa persistencia fue migrada a PostgreSQL. Se retiraron los TXT de datos y sus repositorios; la herramienta puntual de importación ya se retiró tras completar la migración.
 - El administrador puede editar la ficha completa. Si cambia el estado de verificaciÃ³n, usa las acciones de revisiÃ³n en el directorio; editar datos no concede verificaciÃ³n automÃ¡ticamente.
 - Para desarrollo: `mvn -f backend/pom.xml exec:java`; en otra terminal `npm --prefix frontend run dev`. La configuraciÃ³n de PostgreSQL/JWT se debe exportar en cada terminal/proceso que la necesita y nunca escribirse en Git.
 
