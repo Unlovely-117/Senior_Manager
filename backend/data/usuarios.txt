@@ -1,5 +1,0 @@
-Wendy;wendy483@gmail.com;PBKDF2-SHA256$65536$fIG7M2S22SPzHi1YOtxrNg==$RbKZbH5qgc5etq+WaDARz4z8if5QfDacSK+DFbkz0Eg=;ADMINISTRADOR;true
-laura123;laura123726@gmail.com;PBKDF2-SHA256$65536$XBFmiqmzzZNmis5IY3eVPQ==$8eSQZo9zAcnFbHO9uyM9hlhjnHS3KD9GSfbG/cd3EtA=;PROFESIONAL;true
-carmensa flores;carmensaflores308@gmail.com;PBKDF2-SHA256$65536$dAM5UgMYEIi18ZRYhhkaOg==$iQ2PbOB/OJyiOFsMBwbD9ATK2kO/YE50fZeMt5EbOtk=;ADMINISTRADOR;true
-Administrador de prueba;administradordeprueba671@gmail.com;PBKDF2-SHA256$65536$irIdQZihCOENc1BM5/8Fmw==$XLFsFQyscCI5/IfMlxAsE1FigTztzNCN8BrfL/FEGSY=;ADMINISTRADOR;true
-Profesional de prueba;profesionaldeprueba254@gmail.com;PBKDF2-SHA256$65536$2CCvUxLW46dQw7t+2pXlVw==$Xec7Wu9/zORSmuxdPZrjRbh1rCQeFRnbgrglwPhPKHo=;PROFESIONAL;true

@@ -1,43 +1,19 @@
-# Documentación API
-Registrar endpoints REST, métodos, contratos de solicitud/respuesta, autenticación, códigos HTTP y ejemplos sin datos personales reales.
+﻿# Senior-Manage API
 
-## Directorio de profesionales
+## Acceso y permisos
 
-Las cuentas de acceso se almacenan en `usuarios.txt`; los datos complementarios de la ficha (documento y teléfono) se almacenan en `profesionales.txt`. El directorio considera profesionales únicamente las cuentas cuyo rol es `PROFESIONAL`. La respuesta de `GET /api/profesionales` combina ambos archivos por correo, sin incluir contraseñas:
+La API expone rutas bajo `/api`. Requiere sesión autenticada y verifica los permisos efectivos en PostgreSQL en cada módulo. Los módulos profesionales también limitan los datos a pacientes con asignación activa. Las cuentas y permisos no se leen desde TXT.
 
-```json
-{
-  "name": "Nombre de ejemplo",
-  "document": "DOC-DEMO",
-  "email": "profesional@example.test",
-  "phone": "0000000000",
-  "active": true,
-  "accountLinked": true,
-  "hasProfile": true
-}
-```
+La lista de endpoints se obtiene en `backend/src/presentation/SeniorManageApiServer.java`; los nombres de módulo/acción se documentan en `backend/config/permission-matrix-approved.csv`. La API de desarrollo escucha localmente en el puerto 8080; Vite reenvía `/api` al servidor. `GET /api/health` permite comprobar conexión, esquema y permisos, sin iniciar la aplicación completa.
 
-- `accountLinked` indica que el registro corresponde a una cuenta de profesional.
-- `hasProfile` indica que existe una ficha en `profesionales.txt` asociada por correo.
-- Las cuentas sin ficha también aparecen, con `document` y `phone` vacíos.
-- Las fichas sin cuenta coincidente aparecen con `accountLinked: false` para permitir su vinculación manual.
+## Profesionales y ficha
 
-Operaciones administrativas disponibles:
+`GET /api/profesionales` lista cuentas y fichas desde PostgreSQL. `POST /api/profesionales` crea una ficha vinculada a una cuenta existente con rol profesional. `PUT /api/profesionales/{document}` permite al administrador editar identidad visible, contacto, especialidad, registro profesional, formación, experiencia y presentación. Los valores largos están limitados en el backend.
 
-| Método | Ruta | Uso |
-| --- | --- | --- |
-| `GET` | `/api/profesionales` | Listar cuentas profesionales y fichas complementarias |
-| `POST` | `/api/profesionales` | Completar una ficha para una cuenta profesional existente; recibe `email`, `document` y `phone` |
-| `PATCH` | `/api/profesionales/{document}/cuenta` | Vincular una ficha existente a una cuenta profesional; recibe `email` |
-| `PUT` | `/api/profesionales/{document}` | Actualizar los datos de la ficha |
-| `PATCH` | `/api/profesionales/{document}/estado` | Activar o desactivar la cuenta si está vinculada |
-| `DELETE` | `/api/profesionales/{document}` | Eliminar la ficha y la cuenta profesional vinculada; una ficha sin cuenta se elimina sola |
-| `DELETE` | `/api/profesionales/cuenta/{email}` | Eliminar una cuenta profesional que no tiene ficha vinculada |
+El profesional consulta/actualiza su ficha en `/api/mi-perfil-profesional`; un envío la deja pendiente de revisión. El administrador decide si la verifica o solicita cambios. Las contraseñas no se incluyen en las respuestas.
 
-Todas estas rutas requieren una sesión de administrador. Al borrar un profesional vinculado se elimina también su cuenta de `usuarios.txt` y se invalidan sus sesiones. Si solo existe una cuenta o una ficha, se elimina el registro existente.
+## Base de datos y archivos TXT
 
-Las operaciones de escritura guardan el TXT antes de responder correctamente. Las actualizaciones reescriben primero un archivo temporal y lo reemplazan al terminar, evitando que una lectura encuentre un archivo truncado. Los cambios de nombre, correo y estado de una cuenta profesional también se reflejan en su ficha vinculada; el estado actualizado queda guardado tanto en `usuarios.txt` como en `profesionales.txt`.
+PostgreSQL es la persistencia activa de cuentas, profesionales, sesiones, permisos, pacientes, antecedentes, asignaciones, citas y ejercicios. El backend no lee ni escribe `usuarios.txt` ni `profesionales.txt`; esos datos y las implementaciones de repositorio TXT se retiraron.
 
-## Cambio obligatorio de contraseña
-
-Las cuentas con contraseña inicial temporal se marcan en `usuarios.txt` junto al hash PBKDF2, nunca con la contraseña en texto plano. Tras autenticarse, `mustChangePassword` indica si el usuario debe definir una contraseña personal. Mientras siga pendiente, la sesión solo permite consultar `/api/auth/me`, cambiar la contraseña con `POST /api/auth/change-password` o cerrar sesión. El cambio requiere una contraseña de al menos 8 caracteres y su confirmación; al guardarse, la marca temporal se elimina.
+El historial del proyecto incluye una etapa temprana en la que usuarios y profesionales se almacenaban en archivos TXT. Las migraciones posteriores llevaron la persistencia a PostgreSQL. La importación se realizó durante la migración y su herramienta puntual ya fue retirada; no se necesita para el uso normal ni participa en el arranque. La ubicación de la base la determina `SENIOR_MANAGE_JDBC_URL`; el almacenamiento físico se consulta en PostgreSQL con `SHOW data_directory;`.

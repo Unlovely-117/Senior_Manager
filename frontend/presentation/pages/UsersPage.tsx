@@ -3,10 +3,12 @@ import {
     createUser,
     deleteUser,
     listUsers,
+    setUserPassword,
     setUserRole,
     setUserStatus,
     updateUser,
 } from '../../application/managementService';
+import { ApiRequestError } from '../../infrastructure/managementApi';
 import type { AccountRole, UserAccount } from '../../domain/models/management';
 
 type UserForm = {
@@ -35,6 +37,7 @@ export const UsersPage: FC<UsersPageProps> = ({ currentUserEmail }) => {
     const [notice, setNotice] = useState('');
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
+    const [statusUpdatingEmail, setStatusUpdatingEmail] = useState<string | null>(null);
 
     const refreshUsers = async () => {
         const result = await listUsers();
@@ -102,17 +105,25 @@ export const UsersPage: FC<UsersPageProps> = ({ currentUserEmail }) => {
                 setNotice('La cuenta se creó correctamente.');
             } else {
                 await updateUser(editingEmail, { name, email });
+                if (draft.password) await setUserPassword(email, draft.password);
                 if (draft.role !== users.find((user) => user.email === editingEmail)?.role) {
                     await setUserRole(email, draft.role);
                 }
                 setNotice('La cuenta se actualizó correctamente.');
             }
             await refreshUsers();
+            if (editingEmail !== null && draft.password) {
+                setNotice('La contraseña fue reemplazada. La persona deberá volver a iniciar sesión.');
+            }
             setIsFormOpen(false);
             setEditingEmail(null);
             setDraft(emptyForm);
         } catch (error) {
-            setFormError(error instanceof Error ? error.message : 'No se pudo guardar la cuenta.');
+            if (error instanceof ApiRequestError && error.status === 403 && editingEmail === null) {
+                setFormError('Falta USERS/CREATE en los permisos efectivos de PostgreSQL. Ejecuta el comando --apply-approved descrito en backend/README.md contra la misma base de datos de la API y vuelve a intentarlo.');
+            } else {
+                setFormError(error instanceof Error ? error.message : 'No se pudo guardar la cuenta.');
+            }
         } finally {
             setIsSaving(false);
         }
@@ -121,12 +132,15 @@ export const UsersPage: FC<UsersPageProps> = ({ currentUserEmail }) => {
     const toggleStatus = async (user: UserAccount) => {
         setNotice('');
         setRequestError('');
+        setStatusUpdatingEmail(user.email);
         try {
             await setUserStatus(user.email, !user.active);
             await refreshUsers();
             setNotice(`La cuenta de ${user.name} quedó ${user.active ? 'inactiva' : 'activa'}.`);
         } catch (error) {
             setRequestError(error instanceof Error ? error.message : 'No se pudo cambiar el estado.');
+        } finally {
+            setStatusUpdatingEmail(null);
         }
     };
 
@@ -206,6 +220,11 @@ export const UsersPage: FC<UsersPageProps> = ({ currentUserEmail }) => {
                                 <input required type="password" minLength={8} autoComplete="new-password" className={inputClass} value={draft.password} onChange={(event) => setDraft({ ...draft, password: event.target.value })} />
                             </label>
                         )}
+                        {editingEmail !== null && (
+                            <label className="space-y-1.5 text-xs font-semibold text-gray-600">Nueva contraseña (opcional)
+                                <input type="password" minLength={8} autoComplete="new-password" className={inputClass} value={draft.password} onChange={(event) => setDraft({ ...draft, password: event.target.value })} placeholder="Déjalo vacío para conservarla" />
+                            </label>
+                        )}
                         <label className="space-y-1.5 text-xs font-semibold text-gray-600">Rol
                             <select className={inputClass} value={draft.role} onChange={(event) => setDraft({ ...draft, role: event.target.value as AccountRole })}>
                                 <option value="professional">Profesional</option>
@@ -265,7 +284,16 @@ export const UsersPage: FC<UsersPageProps> = ({ currentUserEmail }) => {
                                             </td>
                                             <td className="space-x-3 whitespace-nowrap px-5 py-4">
                                                 <button type="button" disabled={isCurrentUser} onClick={() => openEditForm(user)} className="font-semibold text-[#0d7377] hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline">Editar</button>
-                                                <button type="button" disabled={isCurrentUser} onClick={() => void toggleStatus(user)} className="font-medium text-gray-600 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline">{user.active ? 'Desactivar' : 'Activar'}</button>
+                                                <button
+                                                    type="button"
+                                                    disabled={isCurrentUser || statusUpdatingEmail !== null}
+                                                    onClick={() => void toggleStatus(user)}
+                                                    title={isCurrentUser ? 'No puedes cambiar el estado de tu propia cuenta.' : undefined}
+                                                    aria-label={`${user.active ? 'Desactivar acceso de' : 'Activar acceso de'} ${user.name}`}
+                                                    className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 ${user.active ? 'text-amber-800 hover:bg-amber-50' : 'text-emerald-800 hover:bg-emerald-50'}`}
+                                                >
+                                                    {statusUpdatingEmail === user.email ? 'Actualizando...' : user.active ? 'Desactivar acceso' : 'Activar acceso'}
+                                                </button>
                                                 <button type="button" disabled={isCurrentUser} onClick={() => void removeUser(user)} className="font-medium text-red-600 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline">Eliminar</button>
                                             </td>
                                         </tr>

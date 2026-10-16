@@ -10,7 +10,10 @@ const items = [
     { id: 'profesionales', label: 'Profesionales', icon: '✚' },
     { id: 'adultos', label: 'Adultos mayores', icon: '♡' },
     { id: 'citas', label: 'Citas médicas', icon: '◷' },
+    { id: 'ejercicios', label: 'Ejercicios', icon: '↗', status: 'Solo lectura' },
     { id: 'usuarios', label: 'Usuarios y roles', icon: '◎' },
+    { id: 'asignaciones', label: 'Asignaciones', icon: '↔' },
+    { id: 'permisos', label: 'Permisos', icon: '◇', status: 'Solo lectura' },
 ];
 
 export const AdminMenu: React.FC<AdminMenuProps> = ({ currentView, onSelectView }) => (
@@ -35,6 +38,7 @@ export const AdminMenu: React.FC<AdminMenuProps> = ({ currentView, onSelectView 
                         {item.icon}
                     </span>
                     <span className="leading-tight">{item.label}</span>
+                    {'status' in item && item.status && <span className="hidden rounded-full bg-amber-100/15 px-2 py-1 text-[9px] font-semibold leading-tight text-amber-100 lg:inline">{item.status}</span>}
                 </button>
             );
         })}

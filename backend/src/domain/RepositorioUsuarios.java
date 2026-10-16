@@ -2,6 +2,7 @@ package domain;
 
 import domain.entities.Usuario;
 import java.util.List;
+import java.util.UUID;
 
 // Define las operaciones de almacenamiento de usuarios.
 public interface RepositorioUsuarios {
@@ -14,6 +15,11 @@ public interface RepositorioUsuarios {
 
     // Busca un usuario utilizando su correo.
     Usuario buscarPorCorreo(String correo);
+
+    default Usuario buscarPorId(UUID id) {
+        if (id == null) return null;
+        return listar().stream().filter(usuario -> id.equals(usuario.getId())).findFirst().orElse(null);
+    }
 
     // Actualiza los datos de un usuario existente.
     boolean actualizar(Usuario usuario);

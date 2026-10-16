@@ -5,6 +5,7 @@ import {
     deleteProfessionalAccount,
     linkProfessional,
     listProfessionals,
+    reviewProfessionalProfile,
     setProfessionalStatus,
     updateProfessional,
 } from '../../application/managementService';
@@ -15,9 +16,14 @@ type ProfessionalForm = {
     document: string;
     email: string;
     phone: string;
+    specialty: string;
+    licenseNumber: string;
+    education: string;
+    experience: string;
+    biography: string;
 };
 
-const emptyForm: ProfessionalForm = { name: '', document: '', email: '', phone: '' };
+const emptyForm: ProfessionalForm = { name: '', document: '', email: '', phone: '', specialty: '', licenseNumber: '', education: '', experience: '', biography: '' };
 const inputClass = 'w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-teal-500 focus:bg-white focus:ring-4 focus:ring-teal-500/10';
 
 export const ProfessionalsPage: FC = () => {
@@ -34,6 +40,8 @@ export const ProfessionalsPage: FC = () => {
     const [notice, setNotice] = useState('');
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
+    const [reviewingDocument, setReviewingDocument] = useState<string | null>(null);
+    const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
 
     const refreshProfessionals = async () => {
         setProfessionals(await listProfessionals());
@@ -108,6 +116,8 @@ export const ProfessionalsPage: FC = () => {
             document: professional.document,
             email: professional.email,
             phone: professional.phone,
+            specialty: professional.specialty ?? '', licenseNumber: professional.licenseNumber ?? '',
+            education: professional.education ?? '', experience: professional.experience ?? '', biography: professional.biography ?? '',
         });
         setFormError('');
         setNotice('');
@@ -124,6 +134,8 @@ export const ProfessionalsPage: FC = () => {
                     document: draft.document.trim(),
                     email: selectedAccountEmail,
                     phone: draft.phone.trim(),
+                    specialty: draft.specialty.trim(), licenseNumber: draft.licenseNumber.trim(), education: draft.education.trim(),
+                    experience: draft.experience.trim(), biography: draft.biography.trim(),
                 });
                 setNotice('Ficha profesional creada y vinculada a la cuenta.');
             } else {
@@ -131,6 +143,8 @@ export const ProfessionalsPage: FC = () => {
                     name: draft.name.trim(),
                     email: draft.email.trim(),
                     phone: draft.phone.trim(),
+                    specialty: draft.specialty.trim(), licenseNumber: draft.licenseNumber.trim(), education: draft.education.trim(),
+                    experience: draft.experience.trim(), biography: draft.biography.trim(),
                 });
                 setNotice('Datos de la ficha profesional actualizados.');
             }
@@ -170,6 +184,27 @@ export const ProfessionalsPage: FC = () => {
             setNotice(`${professional.name}: estado de la cuenta actualizado.`);
         } catch (error) {
             setRequestError(error instanceof Error ? error.message : 'No se pudo actualizar el estado.');
+        }
+    };
+
+    const reviewProfile = async (professional: Professional, status: 'VERIFICADA' | 'REQUIERE_CAMBIOS') => {
+        const note = reviewNotes[professional.document]?.trim() ?? '';
+        if (status === 'REQUIERE_CAMBIOS' && !note) {
+            setRequestError('Escribe una nota para indicar qué debe corregir el profesional.');
+            return;
+        }
+        setReviewingDocument(professional.document);
+        setRequestError(''); setNotice('');
+        try {
+            await reviewProfessionalProfile(professional.document, status, note);
+            await refreshProfessionals();
+            setNotice(status === 'VERIFICADA'
+                ? `La ficha de ${professional.name} quedó verificada.`
+                : `Se enviaron las correcciones solicitadas a ${professional.name}.`);
+        } catch (error) {
+            setRequestError(error instanceof Error ? error.message : 'No se pudo guardar la revisión de la ficha.');
+        } finally {
+            setReviewingDocument(null);
         }
     };
 
@@ -222,7 +257,7 @@ export const ProfessionalsPage: FC = () => {
                 </button>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <article className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
                     <p className="text-sm text-gray-500">Cuentas profesionales</p>
                     <p className="mt-2 text-3xl font-bold text-[#102a36]">{isLoading ? '—' : professionalAccounts}</p>
@@ -235,10 +270,14 @@ export const ProfessionalsPage: FC = () => {
                     <p className="text-sm text-gray-500">Fichas por vincular</p>
                     <p className="mt-2 text-3xl font-bold text-amber-700">{isLoading ? '—' : unlinkedProfiles.length}</p>
                 </article>
+                <article className="rounded-2xl border border-amber-100 bg-amber-50 p-5 shadow-sm">
+                    <p className="text-sm text-amber-800">Fichas por verificar</p>
+                    <p className="mt-2 text-3xl font-bold text-amber-900">{isLoading ? '—' : professionals.filter((item) => item.hasProfile && item.verificationStatus !== 'VERIFICADA').length}</p>
+                </article>
             </div>
 
             <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm leading-6 text-cyan-950">
-                <strong>Datos TXT:</strong> las cuentas y sus roles se leen de <code>usuarios.txt</code>; documento y teléfono se leen de <code>profesionales.txt</code>. Las fichas sin coincidencia se muestran aparte para vincularlas manualmente.
+                <strong>Base de datos:</strong> cuentas y fichas se consultan desde PostgreSQL. Las fichas sin cuenta coincidente aparecen aparte para vincularlas manualmente.
             </div>
 
             {notice && <p role="status" className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-900">{notice}</p>}
@@ -310,7 +349,22 @@ export const ProfessionalsPage: FC = () => {
                         <label className="space-y-1.5 text-xs font-semibold text-gray-600">Teléfono
                             <input required type="tel" maxLength={40} className={inputClass} value={draft.phone} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} />
                         </label>
+                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Profesión o especialidad
+                            <input required maxLength={120} className={inputClass} value={draft.specialty} onChange={(event) => setDraft({ ...draft, specialty: event.target.value })} placeholder="Ej.: Fisioterapia geriátrica" />
+                        </label>
+                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Tarjeta o registro profesional
+                            <input required maxLength={100} className={inputClass} value={draft.licenseNumber} onChange={(event) => setDraft({ ...draft, licenseNumber: event.target.value })} />
+                        </label>
                     </div>
+                    <label className="mt-4 block space-y-1.5 text-xs font-semibold text-gray-600">Formación académica
+                        <textarea required maxLength={300} rows={2} className={inputClass} value={draft.education} onChange={(event) => setDraft({ ...draft, education: event.target.value })} placeholder="Títulos, institución y año" />
+                    </label>
+                    <label className="mt-4 block space-y-1.5 text-xs font-semibold text-gray-600">Experiencia relevante
+                        <textarea maxLength={2000} rows={3} className={inputClass} value={draft.experience} onChange={(event) => setDraft({ ...draft, experience: event.target.value })} />
+                    </label>
+                    <label className="mt-4 block space-y-1.5 text-xs font-semibold text-gray-600">Presentación profesional
+                        <textarea maxLength={2000} rows={3} className={inputClass} value={draft.biography} onChange={(event) => setDraft({ ...draft, biography: event.target.value })} />
+                    </label>
                     <p className="mt-3 text-xs text-gray-500">La cuenta y el rol se administran en Usuarios y roles. Esta ficha guarda únicamente los datos profesionales complementarios.</p>
                     <button type="submit" disabled={isSaving || (editingDocument === null && !selectedAccountEmail)} className="mt-5 rounded-xl bg-[#0d7377] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-teal-800 disabled:cursor-wait disabled:opacity-60">
                         {isSaving ? 'Guardando…' : editingDocument === null ? 'Guardar ficha' : 'Guardar cambios'}
@@ -356,6 +410,16 @@ export const ProfessionalsPage: FC = () => {
                                         <td className="px-5 py-4 text-gray-600">
                                             <p>{professional.document ? `Documento ${professional.document}` : 'Sin ficha profesional'}</p>
                                             <p className="mt-1 text-xs text-gray-500">{professional.phone || 'Teléfono no registrado'}</p>
+                                            {professional.hasProfile && <details className="mt-2 max-w-xs">
+                                                <summary className="cursor-pointer text-xs font-semibold text-[#0d7377]">Ver datos enviados</summary>
+                                                <dl className="mt-2 space-y-1 rounded-lg bg-slate-50 p-3 text-xs">
+                                                    <div><dt className="font-semibold">Especialidad</dt><dd>{professional.specialty || 'No registrada'}</dd></div>
+                                                    <div><dt className="font-semibold">Registro profesional</dt><dd>{professional.licenseNumber || 'No registrado'}</dd></div>
+                                                    <div><dt className="font-semibold">Formación</dt><dd>{professional.education || 'No registrada'}</dd></div>
+                                                    <div><dt className="font-semibold">Experiencia</dt><dd className="whitespace-pre-wrap">{professional.experience || 'No registrada'}</dd></div>
+                                                    {professional.biography && <div><dt className="font-semibold">Presentación</dt><dd className="whitespace-pre-wrap">{professional.biography}</dd></div>}
+                                                </dl>
+                                            </details>}
                                         </td>
                                         <td className="px-5 py-4">
                                             <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${professional.active ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>
@@ -364,6 +428,10 @@ export const ProfessionalsPage: FC = () => {
                                             <p className={`mt-2 text-xs font-medium ${professional.accountLinked ? 'text-teal-700' : 'text-amber-700'}`}>
                                                 {professional.accountLinked ? professional.hasProfile ? 'Cuenta y ficha vinculadas' : 'Cuenta sin ficha' : 'Ficha sin cuenta vinculada'}
                                             </p>
+                                            {professional.hasProfile && <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${professional.verificationStatus === 'VERIFICADA' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>
+                                                {professional.verificationStatus === 'VERIFICADA' ? 'Ficha verificada' : professional.verificationStatus === 'REQUIERE_CAMBIOS' ? 'Requiere cambios' : professional.verificationStatus === 'PENDIENTE' ? 'Pendiente de revisión' : 'Sin presentar'}
+                                            </span>}
+                                            {professional.reviewNote && <p className="mt-1 max-w-xs text-xs text-amber-800">Nota anterior: {professional.reviewNote}</p>}
                                         </td>
                                         <td className="min-w-[250px] space-y-2 px-5 py-4">
                                             {professional.accountLinked && !professional.hasProfile ? (
@@ -402,6 +470,15 @@ export const ProfessionalsPage: FC = () => {
                                                     </button>
                                                 </div>
                                             ) : null}
+                                            {professional.hasProfile && professional.verificationStatus !== 'VERIFICADA' && <div className="mt-3 max-w-xs space-y-2 border-t border-gray-100 pt-3">
+                                                <label className="block text-xs font-semibold text-gray-600">Nota para el profesional
+                                                    <textarea rows={2} maxLength={2000} value={reviewNotes[professional.document] ?? ''} onChange={(event) => setReviewNotes({ ...reviewNotes, [professional.document]: event.target.value })} className="mt-1 w-full rounded-lg border border-gray-200 p-2 text-xs" placeholder="Indica qué falta o qué debe corregirse" />
+                                                </label>
+                                                <div className="flex flex-wrap gap-2">
+                                                    <button type="button" disabled={reviewingDocument !== null || !professional.document || !professional.phone || !professional.specialty || !professional.licenseNumber || !professional.education} onClick={() => void reviewProfile(professional, 'VERIFICADA')} className="rounded-lg bg-emerald-700 px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50">{reviewingDocument === professional.document ? 'Guardando...' : 'Verificar ficha'}</button>
+                                                    <button type="button" disabled={reviewingDocument !== null || !(reviewNotes[professional.document]?.trim())} onClick={() => void reviewProfile(professional, 'REQUIERE_CAMBIOS')} className="rounded-lg border border-amber-300 px-2.5 py-1.5 text-xs font-semibold text-amber-900 disabled:opacity-50">Solicitar corrección</button>
+                                                </div>
+                                            </div>}
                                         </td>
                                     </tr>
                                 ))}

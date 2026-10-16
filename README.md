@@ -1,63 +1,54 @@
-# Senior-Manage
+﻿# Senior-Manage
 
-Espacio central de trabajo para planificar, ejecutar y hacer seguimiento del desarrollo de Senior-Manage durante cuatro sprints.
+Aplicación web para que administradores y profesionales coordinen atención, pacientes, asignaciones, citas, ejercicios y fichas profesionales.
 
-## Descripción
-Senior-Manage es una plataforma para apoyar la gestión de terapia física y cuidado de adultos mayores. Los únicos usuarios de la plataforma son el **Administrador** y el **Profesional** (fisioterapeutas/cuidadores). Los pacientes no ingresan directamente al sistema.
+## Inicio rápido
 
-## Arquitectura
-El proyecto utiliza una arquitectura cliente-servidor desacoplada:
-- **Frontend** independiente que consume una API REST.
-- **Backend** como monolito modular organizado por capas.
-- **Base de datos** centralizada, accesible únicamente desde el backend.
+Requisitos: JDK 17, Maven 3.9+, Node.js/npm y PostgreSQL.
 
-La arquitectura y las reglas de dependencias se documentan en [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md).
+1. Configura PostgreSQL y las variables externas que describe [backend/README.md](backend/README.md). La URL JDBC indica el servidor y la base que usará la API.
+2. Aplica las migraciones Flyway V1–V5 con el comando de [backend/migrations/README.md](backend/migrations/README.md).
+3. Inicializa o reconcilia la matriz aprobada de permisos siguiendo [backend/README.md](backend/README.md).
+4. En una terminal, desde la raíz: `mvn -f backend/pom.xml exec:java`.
+5. En otra terminal: `npm --prefix frontend install` y `npm --prefix frontend run dev`.
+6. Abre la dirección local que muestra Vite. `/api/health` informa si PostgreSQL, esquema y permisos están listos.
 
-## Estructura del repositorio
+No hay credenciales, contraseñas ni secretos de ejemplo incluidos en el repositorio. Configúralos fuera del código.
 
-```text
-Senior_Manager/
-├── docs/
-│   ├── architecture/       # Arquitectura y decisiones técnicas
-│   ├── requirements/       # Requisitos funcionales y no funcionales
-│   ├── api/                # Contratos y documentación REST
-│   └── sprints/            # Planificación y evidencias de los 4 sprints
-├── frontend/
-│   ├── presentation/       # UI, vistas y componentes
-│   ├── application/        # Casos de uso y estado del cliente
-│   ├── domain/             # Modelos y reglas del cliente
-│   ├── infrastructure/     # Cliente HTTP y adaptadores
-│   └── tests/
-├── backend/
-│   ├── src/
-│   │   ├── presentation/   # Rutas, controladores y DTO
-│   │   ├── application/    # Casos de uso
-│   │   ├── domain/         # Entidades y reglas de negocio
-│   │   ├── infrastructure/ # Persistencia y adaptadores concretos
-│   │   └── shared/         # Elementos técnicos transversales
-│   ├── migrations/
-│   └── tests/
-└── database/
-    ├── scripts/
-    ├── seeds/              # Solo datos ficticios
-    └── diagrams/
-```
+## Datos y base de datos
 
-## Regla de separación por capas
-1. La presentación no contiene lógica de negocio ni accede directamente a la base de datos.
-2. Los casos de uso coordinan operaciones y dependen de contratos.
-3. El dominio contiene las reglas e invariantes del negocio y no depende de frameworks, HTTP u ORM.
-4. La infraestructura implementa los contratos de persistencia y servicios externos.
-5. Las dependencias se dirigen hacia las capas internas; los controladores y componentes visuales deben mantenerse delgados.
+El almacenamiento actual del servidor es PostgreSQL: cuentas, profesionales, permisos, pacientes, antecedentes, asignaciones, citas, ejercicios y sesiones se consultan desde allí. Los datos no viven en un archivo dentro del repositorio. La URL JDBC (`SENIOR_MANAGE_JDBC_URL`) determina el host, puerto y nombre de base; el directorio físico de PostgreSQL depende de la instalación del servidor. Consulta `SHOW data_directory;` en PostgreSQL para conocerlo.
 
-## Tecnologías
-Los frameworks, lenguajes, motor de base de datos y proveedor de despliegue se definirán mediante decisión explícita del equipo. No se debe agregar configuración dependiente de una tecnología antes de acordarla.
+En una etapa anterior se usaron archivos TXT como almacenamiento de usuarios y profesionales. La aplicación migró a PostgreSQL y dejó de leer/escribir esos archivos. Los TXT antiguos del proyecto y sus adaptadores se retiraron; la herramienta de importación se usó solo durante la migración y ya se retiró. No es necesario para el uso normal.
 
-## Seguridad y datos
-- Proteger los datos personales y de salud mediante mínimo privilegio y autorización en backend.
-- No guardar contraseñas en texto plano ni incluir secretos en el repositorio.
-- Usar exclusivamente datos ficticios en pruebas y seeds.
-- No registrar información sensible de pacientes en logs.
+## Funciones
 
-## Trabajo por sprints
-La planificación se mantiene en [docs/sprints/](docs/sprints/), con una carpeta por cada uno de los cuatro sprints. Cada sprint debe registrar objetivo, historias seleccionadas, tareas por capa, criterios de aceptación, pruebas y evidencia del incremento.
+- Acceso por roles de administrador y profesional, con permisos validados en el backend.
+- Administración de usuarios, profesionales y estado de cuentas.
+- Fichas profesionales con datos de perfil enviados por el profesional y revisión del administrador.
+- Pacientes, antecedentes y asignaciones con historial.
+- Citas y seguimiento de ejercicios según los permisos vigentes.
+- Tema claro/oscuro, seleccionable desde la pantalla y recordado en el navegador.
+
+Los módulos sin flujo completo se identifican en la interfaz como en construcción.
+
+## Documentación
+
+- [Guía del proyecto y mapa de documentos](docs/README.md)
+- [Arquitectura](docs/architecture/ARCHITECTURE.md)
+- [API](docs/api/README.md)
+- [Configuración y ejecución del backend](backend/README.md)
+- [Migraciones de PostgreSQL](backend/migrations/README.md)
+- [Documentación de sprints](docs/sprints/)
+
+## Estructura
+
+- `frontend/`: React, TypeScript, Vite e interfaz.
+- `backend/src/`: API y lógica Java 17.
+- `backend/migrations/`: migraciones Flyway versionadas.
+- `database/`: notas de semillas, scripts y diagramas.
+- `docs/`: arquitectura, API, requisitos y registro de sprints.
+
+## Seguridad
+
+No publiques la API de desarrollo en Internet. Para despliegues, configura HTTPS, secretos externos, copias de seguridad y controles de acceso adecuados. No registres ni compartas datos personales o clínicos.

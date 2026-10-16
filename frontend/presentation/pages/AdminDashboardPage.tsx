@@ -1,6 +1,6 @@
 import { useEffect, useState, type FC } from 'react';
-import { listProfessionals, listUsers } from '../../application/managementService';
-import type { Professional, UserAccount } from '../../domain/models/management';
+import { listPatients, listProfessionals, listUsers } from '../../application/managementService';
+import type { Patient, Professional, UserAccount } from '../../domain/models/management';
 
 type AdminDashboardPageProps = {
     onNavigate: (view: string) => void;
@@ -9,43 +9,40 @@ type AdminDashboardPageProps = {
 export const AdminDashboardPage: FC<AdminDashboardPageProps> = ({ onNavigate }) => {
     const [professionals, setProfessionals] = useState<Professional[]>([]);
     const [users, setUsers] = useState<UserAccount[]>([]);
+    const [patients, setPatients] = useState<Patient[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [loadError, setLoadError] = useState('');
+    const [reloadKey, setReloadKey] = useState(0);
 
     useEffect(() => {
         let isCurrent = true;
-        Promise.all([listProfessionals(), listUsers()])
-            .then(([professionalList, userList]) => {
+        setIsLoading(true);
+        Promise.all([listProfessionals(), listUsers(), listPatients()])
+            .then(([professionalList, userList, patientList]) => {
                 if (isCurrent) {
                     setProfessionals(professionalList);
                     setUsers(userList);
+                    setPatients(patientList);
                     setLoadError('');
                 }
             })
             .catch((error: unknown) => {
-                if (isCurrent) {
-                    setLoadError(error instanceof Error ? error.message : 'No se pudieron cargar los datos del panel.');
-                }
+                if (isCurrent) setLoadError(error instanceof Error ? error.message : 'No se pudieron cargar los datos del panel.');
             })
-            .finally(() => {
-                if (isCurrent) {
-                    setIsLoading(false);
-                }
-            });
+            .finally(() => { if (isCurrent) setIsLoading(false); });
         return () => { isCurrent = false; };
-    }, []);
+    }, [reloadKey]);
 
     const professionalAccounts = professionals.filter((professional) => professional.accountLinked);
     const activeProfessionals = professionalAccounts.filter((professional) => professional.active).length;
     const activeUsers = users.filter((user) => user.active).length;
-    const adminUsers = users.filter((user) => user.role === 'admin').length;
+    const activeAdminUsers = users.filter((user) => user.role === 'admin' && user.active).length;
     const stats = [
         { label: 'Profesionales', value: professionalAccounts.length, detail: `${activeProfessionals} activos`, icon: '✚', tint: 'bg-teal-50 text-[#0d7377]', view: 'profesionales' },
-        { label: 'Usuarios activos', value: activeUsers, detail: `${users.length - activeUsers} inactivos`, icon: '◎', tint: 'bg-cyan-50 text-cyan-700', view: 'usuarios' },
-        { label: 'Administradores', value: adminUsers, detail: 'Cuentas con acceso de gestión', icon: '♙', tint: 'bg-indigo-50 text-indigo-700', view: 'usuarios' },
-        { label: 'Adultos mayores', value: 'Demo', detail: 'Módulo en etapa de prototipo', icon: '♡', tint: 'bg-amber-50 text-amber-700', view: 'adultos' },
+        { label: 'Usuarios activos', value: activeUsers, detail: `${users.length - activeUsers} inactivos`, icon: '◉', tint: 'bg-cyan-50 text-cyan-700', view: 'usuarios' },
+        { label: 'Administradores activos', value: activeAdminUsers, detail: 'Cuentas activas con rol administrador', icon: '♙', tint: 'bg-indigo-50 text-indigo-700', view: 'usuarios' },
+        { label: 'Adultos mayores', value: patients.length, detail: 'Registros activos en la base de datos', icon: '♡', tint: 'bg-amber-50 text-amber-700', view: 'adultos' },
     ];
-
     return (
         <section className="mx-auto w-full max-w-7xl space-y-6 p-5 sm:p-8">
             <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-[#071b2c] via-[#0b3545] to-[#0d7377] p-6 text-white shadow-xl shadow-teal-950/10 sm:p-8">
@@ -62,11 +59,18 @@ export const AdminDashboardPage: FC<AdminDashboardPageProps> = ({ onNavigate }) 
             </div>
 
             {loadError && (
-                <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-                    No se pudieron cargar las estadísticas desde la API: {loadError}
-                </p>
+                <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                    <span>No se pudieron cargar las estadisticas desde la API: {loadError}</span>
+                    <button type="button" onClick={() => setReloadKey((value) => value + 1)} disabled={isLoading} className="font-semibold underline disabled:opacity-50">Reintentar</button>
+                </div>
             )}
-
+            {!loadError && (
+                <div className="flex justify-end">
+                    <button type="button" onClick={() => setReloadKey((value) => value + 1)} disabled={isLoading} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-teal-200 hover:text-[#0d7377] disabled:cursor-wait disabled:opacity-50">
+                        {isLoading ? 'Actualizando...' : 'Actualizar estadisticas'}
+                    </button>
+                </div>
+            )}
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 {stats.map((stat) => (
                     <button
@@ -77,7 +81,7 @@ export const AdminDashboardPage: FC<AdminDashboardPageProps> = ({ onNavigate }) 
                     >
                         <span className={`flex h-11 w-11 items-center justify-center rounded-2xl text-xl ${stat.tint}`} aria-hidden="true">{stat.icon}</span>
                         <span className="mt-4 block text-sm font-medium text-slate-500">{stat.label}</span>
-                        <span className="mt-1 block text-3xl font-bold tracking-tight text-[#102a36]">{(isLoading || loadError) && typeof stat.value === 'number' ? '—' : stat.value}</span>
+                        <span className={`mt-1 block font-bold tracking-tight text-[#102a36] ${typeof stat.value === 'number' ? 'text-3xl' : 'text-base'}`}>{(isLoading || loadError) && typeof stat.value === 'number' ? '—' : stat.value}</span>
                         <span className="mt-1 block text-xs text-slate-400">{isLoading && typeof stat.value === 'number' ? 'Cargando datos…' : loadError && typeof stat.value === 'number' ? 'No disponible' : stat.detail}</span>
                     </button>
                 ))}
@@ -132,16 +136,16 @@ export const AdminDashboardPage: FC<AdminDashboardPageProps> = ({ onNavigate }) 
                         </button>
                         <button type="button" onClick={() => onNavigate('adultos')} className="flex w-full items-center gap-3 rounded-xl border border-slate-100 p-3 text-left transition hover:border-teal-200 hover:bg-teal-50/50">
                             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-lg text-amber-700" aria-hidden="true">♡</span>
-                            <span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-slate-800">Adultos mayores</span><span className="mt-0.5 block text-xs text-slate-500">Revisa la vista de demostración</span></span>
+                            <span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-slate-800">Adultos mayores</span><span className="mt-0.5 block text-xs text-slate-500">Consulta el módulo y sus permisos</span></span>
                             <span className="text-slate-400" aria-hidden="true">→</span>
                         </button>
                         <button type="button" onClick={() => onNavigate('citas')} className="flex w-full items-center gap-3 rounded-xl border border-slate-100 p-3 text-left transition hover:border-teal-200 hover:bg-teal-50/50">
                             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-50 text-lg text-cyan-700" aria-hidden="true">◷</span>
-                            <span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-slate-800">Citas médicas</span><span className="mt-0.5 block text-xs text-slate-500">Módulo informativo de agenda</span></span>
+                            <span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-slate-800">Citas médicas</span><span className="mt-0.5 block text-xs text-slate-500">Crear y organizar citas de pacientes</span></span>
                             <span className="text-slate-400" aria-hidden="true">→</span>
                         </button>
                     </div>
-                    <p className="mt-5 rounded-xl bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-800">Los módulos de residentes y citas aún no tienen persistencia en el backend.</p>
+                    <p className="mt-5 rounded-xl bg-teal-50 px-3 py-2.5 text-xs leading-5 text-teal-800">Los datos se consultan y guardan en PostgreSQL; el acceso se controla desde la API.</p>
                 </section>
             </div>
         </section>

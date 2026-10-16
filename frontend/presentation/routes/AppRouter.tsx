@@ -9,19 +9,33 @@ import { ProfessionalDashboardPage } from '../pages/ProfessionalDashboardPage';
 import { ProfessionalsPage } from '../pages/ProfessionalsPage';
 import { UsersPage } from '../pages/UsersPage';
 import { ElderlyPage } from '../pages/ElderlyPage';
-import { MedicationsPage } from '../pages/MedicationsPage';
+import { ExercisesPage } from '../pages/ExercisesPage';
 import { ChangePasswordPage } from '../pages/ChangePasswordPage';
+import { AdminAssignmentsPage } from '../pages/AdminAssignmentsPage';
+import { AdminPermissionsPage } from '../pages/AdminPermissionsPage';
+import { ProfessionalProfilePage } from '../pages/ProfessionalProfilePage';
+import { BrandMark } from '../components/BrandMark';
 
 export const AppRouter: React.FC = () => {
+    const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+        try { return localStorage.getItem('senior-manage-theme') === 'dark' ? 'dark' : 'light'; } catch { return 'light'; }
+    });
     const [session, setSession] = useState<Omit<AuthenticatedUser, 'token'> | null>(null);
     const [selectedRole, setSelectedRole] = useState<AccountRole | null>(null);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loginError, setLoginError] = useState('');
+    const [sessionNotice, setSessionNotice] = useState('');
     const [isSigningIn, setIsSigningIn] = useState(false);
     const [isRestoringSession, setIsRestoringSession] = useState(true);
     const [currentView, setCurrentView] = useState('panel');
     const role = session?.role ?? null;
+
+    useEffect(() => {
+        document.documentElement.dataset.theme = theme;
+        try { localStorage.setItem('senior-manage-theme', theme); } catch { /* Keep the selection for this session. */ }
+    }, [theme]);
+    const themeButton = <button type="button" onClick={() => setTheme((current) => current === 'light' ? 'dark' : 'light')} aria-label={theme === 'light' ? 'Activar tema oscuro' : 'Activar tema claro'} className="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-teal-300 hover:text-teal-800">{theme === 'light' ? '◐ Oscuro' : '☀ Claro'}</button>;
 
     useEffect(() => {
         let isCurrent = true;
@@ -29,6 +43,7 @@ export const AppRouter: React.FC = () => {
             setSession(null);
             setSelectedRole(null);
             setPassword('');
+            setSessionNotice('');
             setLoginError('Tu sesión expiró. Inicia sesión nuevamente.');
         };
 
@@ -37,7 +52,7 @@ export const AppRouter: React.FC = () => {
             .then((restoredSession) => {
                 if (isCurrent && restoredSession) {
                     setSession(restoredSession);
-                    setCurrentView(restoredSession.role === 'admin' ? 'panel' : 'mi-panel');
+                    setCurrentView(restoredSession.role === 'admin' ? 'panel' : 'mi-ficha');
                 }
             })
             .catch((error: unknown) => {
@@ -69,6 +84,7 @@ export const AppRouter: React.FC = () => {
 
         setIsSigningIn(true);
         setLoginError('');
+        setSessionNotice('');
         try {
             const authenticatedUser = await signIn(email.trim(), password);
             if (authenticatedUser.role !== selectedRole) {
@@ -83,7 +99,7 @@ export const AppRouter: React.FC = () => {
                 role: authenticatedUser.role,
                 mustChangePassword: authenticatedUser.mustChangePassword,
             });
-            setCurrentView(authenticatedUser.role === 'admin' ? 'panel' : 'mi-panel');
+            setCurrentView(authenticatedUser.role === 'admin' ? 'panel' : 'mi-ficha');
             setPassword('');
         } catch (error) {
             setLoginError(error instanceof Error ? error.message : 'No se pudo iniciar sesión.');
@@ -95,7 +111,10 @@ export const AppRouter: React.FC = () => {
     const handleSignOut = async () => {
         try {
             await signOut();
+            setSessionNotice('Sesión cerrada correctamente.');
+            setLoginError('');
         } catch (error) {
+            setSessionNotice('');
             setLoginError(error instanceof Error ? error.message : 'No se pudo cerrar la sesión en el servidor.');
         } finally {
             setSession(null);
@@ -117,8 +136,14 @@ export const AppRouter: React.FC = () => {
                     return <ElderlyPage isAdmin />;
                 case 'usuarios':
                     return <UsersPage currentUserEmail={session?.email ?? ''} />;
+                case 'asignaciones':
+                    return <AdminAssignmentsPage />;
+                case 'permisos':
+                    return <AdminPermissionsPage />;
                 case 'citas':
                     return <AdminAppointmentsPage onNavigate={setCurrentView} />;
+                case 'ejercicios':
+                    return <ExercisesPage readOnly />;
                 default:
                     return <AdminDashboardPage onNavigate={setCurrentView} />;
             }
@@ -130,17 +155,14 @@ export const AppRouter: React.FC = () => {
                     return <ProfessionalDashboardPage />;
                 case 'mis-pacientes':
                     return <ElderlyPage />;
-                case 'medicamentos':
-                    return <MedicationsPage />;
+                case 'ejercicios':
+                    return <ExercisesPage />;
+                case 'agenda':
+                    return <AdminAppointmentsPage isAdmin={false} />;
+                case 'mi-ficha':
+                    return <ProfessionalProfilePage />;
                 default:
-                    return (
-                        <div className="p-8">
-                            <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-                                <h3 className="text-xl font-bold text-gray-900">Agenda y citas</h3>
-                                <p className="mt-2 text-sm text-gray-500">Esta vista estará disponible cuando se integre el módulo de citas.</p>
-                            </div>
-                        </div>
-                    );
+                    return <ProfessionalDashboardPage />;
             }
         }
 
@@ -176,6 +198,7 @@ export const AppRouter: React.FC = () => {
                 <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-5 sm:px-8 md:h-full md:min-h-0">
                     <header className="flex shrink-0 items-center justify-between py-4">
                         <div className="flex items-center gap-3 text-white">
+                            {themeButton}
                             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/15 shadow-inner ring-1 ring-white/20">
                                 <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7" aria-hidden="true">
                                     <path d="M12 20.25s-7.5-4.35-7.5-10.1a4.15 4.15 0 0 1 7.5-2.43 4.15 4.15 0 0 1 7.5 2.43c0 5.75-7.5 10.1-7.5 10.1Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
@@ -285,10 +308,11 @@ export const AppRouter: React.FC = () => {
                                     </form>
                                 ) : (
                                     <div className="space-y-2.5">
+                                        {sessionNotice && <p role="status" aria-live="polite" className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-800">{sessionNotice}</p>}
                                         {loginError && <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">{loginError}</p>}
                                         <button
                                             type="button"
-                                            onClick={() => { setSelectedRole('admin'); setCurrentView('panel'); setLoginError(''); }}
+                                            onClick={() => { setSelectedRole('admin'); setCurrentView('panel'); setLoginError(''); setSessionNotice(''); }}
                                             className="group flex w-full items-center gap-3 rounded-2xl border border-gray-200 bg-white p-3 text-left transition duration-200 hover:-translate-y-0.5 hover:border-teal-300 hover:bg-teal-50/60 hover:shadow-lg focus:outline-none focus-visible:ring-4 focus-visible:ring-teal-100"
                                         >
                                             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0d7377] text-white shadow-md shadow-teal-900/15" aria-hidden="true">
@@ -305,7 +329,7 @@ export const AppRouter: React.FC = () => {
 
                                         <button
                                             type="button"
-                                            onClick={() => { setSelectedRole('professional'); setCurrentView('mi-panel'); setLoginError(''); }}
+                                            onClick={() => { setSelectedRole('professional'); setCurrentView('mi-panel'); setLoginError(''); setSessionNotice(''); }}
                                             className="group flex w-full items-center gap-3 rounded-2xl border border-gray-200 bg-white p-3 text-left transition duration-200 hover:-translate-y-0.5 hover:border-cyan-300 hover:bg-cyan-50/60 hover:shadow-lg focus:outline-none focus-visible:ring-4 focus-visible:ring-cyan-100"
                                         >
                                             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#079bb5] text-white shadow-md shadow-cyan-900/15" aria-hidden="true">
@@ -343,23 +367,23 @@ export const AppRouter: React.FC = () => {
             adultos: 'Adultos mayores',
             citas: 'Citas médicas',
             usuarios: 'Usuarios y roles',
+            asignaciones: 'Asignaciones de pacientes',
+            permisos: 'Permisos por rol',
+            ejercicios: 'Ejercicios',
         };
 
         return (
             <div className="min-h-screen bg-[#f2f7f7] text-slate-900">
                 <div className="mx-auto flex min-h-screen max-w-[1600px] flex-col gap-4 md:flex-row md:gap-5 md:p-5 lg:gap-6 lg:p-6">
-                    <aside className="shrink-0 overflow-hidden bg-gradient-to-br from-[#071b2c] via-[#0b3545] to-[#0d7377] text-white shadow-xl shadow-teal-950/10 md:flex md:w-72 md:flex-col md:rounded-[28px]">
+                    <aside className="shrink-0 overflow-hidden bg-gradient-to-br from-[#071b2c] via-[#0b3545] to-[#0d7377] text-white shadow-xl shadow-teal-950/10 md:flex md:w-60 md:flex-col md:rounded-[28px] lg:w-64">
                         <div className="flex items-center justify-between px-5 pb-2 pt-5 md:px-6 md:pb-0 md:pt-6">
-                            <div className="flex items-center gap-3">
-                                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/15 text-xl font-bold text-white shadow-inner ring-1 ring-white/20" aria-hidden="true">+</div>
-                                <div>
-                                    <h1 className="font-bold leading-tight tracking-tight">Senior-Manage</h1>
-                                    <p className="mt-1 text-xs text-white/60">Gestión geriátrica</p>
+                            <div className="flex min-w-0 items-center gap-3">
+                                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/15 text-white shadow-inner ring-1 ring-white/20"><BrandMark className="h-7 w-7" /></div>
+                                <div className="min-w-0">
+                                    <h1 className="whitespace-nowrap text-[17px] font-bold leading-none tracking-normal">Senior<span className="text-teal-200">-Manage</span></h1>
+                                    <p className="mt-2 text-[11px] font-medium tracking-wide text-white/65">Gestión geriátrica</p>
                                 </div>
                             </div>
-                            <span className="hidden rounded-full border border-teal-100/15 bg-white/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-teal-100 md:inline-flex">
-                                Administrador
-                            </span>
                         </div>
                         <div className="hidden px-6 pt-7 md:block">
                             <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-teal-100/65">Espacio de trabajo</p>
@@ -384,6 +408,7 @@ export const AppRouter: React.FC = () => {
 
                     <main className="flex min-w-0 flex-1 flex-col">
                         <header className="mx-4 flex items-center justify-between gap-4 rounded-2xl border border-white bg-white/90 px-5 py-4 shadow-sm shadow-slate-900/[0.03] md:mx-0 md:rounded-[22px] md:px-6">
+                            {themeButton}
                             <div className="min-w-0">
                                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#0d7377]">Senior-Manage · Administración</p>
                                 <h2 className="mt-1 truncate text-lg font-bold tracking-tight text-[#102a36] sm:text-xl">{viewTitles[currentView] ?? 'Administración'}</h2>
@@ -407,37 +432,45 @@ export const AppRouter: React.FC = () => {
         );
     }
 
+    const professionalTitles: Record<string, string> = {
+        'mi-panel': 'Mi panel',
+        'mis-pacientes': 'Adultos mayores',
+        agenda: 'Agenda y citas',
+        ejercicios: 'Ejercicios',
+        'mi-ficha': 'Mi ficha profesional',
+    };
+
     return (
-        <div className="bg-gray-100 font-sans h-screen flex overflow-hidden">
-            <aside className="w-64 bg-[#0b132b] text-white flex flex-col justify-between">
-                <div>
-                    <div className="flex items-center space-x-3 p-6 border-b border-gray-800">
-                        <div className="bg-[#00b4d8] text-white p-2 rounded-lg font-bold">+</div>
-                        <div>
-                            <h1 className="font-bold text-lg leading-tight">Senior-Manage</h1>
-                            <span className="text-xs text-gray-400">Gestión geriátrica</span>
+        <div className="min-h-screen bg-[#f2f7f7] text-slate-900">
+            <div className="mx-auto flex min-h-screen max-w-[1600px] flex-col gap-4 md:flex-row md:gap-5 md:p-5 lg:gap-6 lg:p-6">
+                <aside className="shrink-0 overflow-hidden bg-gradient-to-br from-[#071b2c] via-[#0b3545] to-[#0d7377] text-white shadow-xl shadow-teal-950/10 md:flex md:w-60 md:flex-col md:rounded-[28px] lg:w-64">
+                    <div className="flex items-center justify-between px-5 pb-2 pt-5 md:px-6 md:pb-0 md:pt-6">
+                        <div className="flex min-w-0 items-center gap-3">
+                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/15 text-white ring-1 ring-white/20"><BrandMark className="h-7 w-7" /></div>
+                            <div className="min-w-0"><h1 className="whitespace-nowrap text-[17px] font-bold leading-none tracking-normal">Senior<span className="text-teal-200">-Manage</span></h1><p className="mt-2 text-[11px] font-medium tracking-wide text-white/65">Gestión geriátrica</p></div>
                         </div>
                     </div>
+                    <div className="hidden px-6 pt-7 md:block"><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-teal-100/65">Espacio de trabajo</p><p className="mt-1 text-sm font-semibold text-white/90">Atención profesional</p></div>
                     <ProfessionalMenu currentView={currentView} onSelectView={setCurrentView} />
-                </div>
-                <div className="p-4 border-t border-gray-800 flex justify-between items-center text-xs">
-                    <span className="text-gray-400 uppercase">Rol: {role}</span>
-                    <button onClick={() => void handleSignOut()} className="text-red-400 hover:underline">Salir</button>
-                </div>
-            </aside>
-
-            <main className="flex-1 flex flex-col overflow-y-auto">
-                <header className="bg-white border-b border-gray-200 px-8 py-4 flex justify-between items-center">
-                    <div>
-                        <h2 className="text-2xl font-bold text-gray-900 capitalize">
-                            {currentView.replace('-', ' ')}
-                        </h2>
-                        {session && <p className="mt-1 text-sm text-gray-500">Hola, {session.name}</p>}
+                    <div className="hidden border-t border-white/10 p-4 md:mt-auto md:block">
+                        <div className="flex items-center gap-3 rounded-2xl bg-white/[0.08] p-3">
+                            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-teal-200/15 text-sm font-bold text-teal-100" aria-hidden="true">{session?.name.split(/\s+/).slice(0, 2).map((part) => part.charAt(0)).join('').toLocaleUpperCase()}</span>
+                            <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-white">{session?.name}</p><p className="truncate text-xs text-white/55">{session?.email}</p></div>
+                        </div>
+                        <button type="button" onClick={() => void handleSignOut()} className="mt-3 w-full rounded-xl px-3 py-2 text-left text-sm font-semibold text-white/75 transition hover:bg-white/10 hover:text-white">Cerrar sesión</button>
                     </div>
-                </header>
-
-                {renderCurrentView()}
-            </main>
+                </aside>
+                <main className="flex min-w-0 flex-1 flex-col">
+                    <header className="mx-4 flex items-center justify-between gap-4 rounded-2xl border border-white bg-white/90 px-5 py-4 shadow-sm shadow-slate-900/[0.03] md:mx-0 md:rounded-[22px] md:px-6">
+                        {themeButton}
+                        <div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#0d7377]">Senior-Manage · Atención profesional</p><h2 className="mt-1 truncate text-lg font-bold tracking-tight text-[#102a36] sm:text-xl">{professionalTitles[currentView] ?? 'Atención profesional'}</h2><p className="mt-1 hidden text-xs text-slate-500 sm:block">Hola, {session?.name}. Aquí tienes tu espacio de trabajo.</p></div>
+                        <button type="button" onClick={() => void handleSignOut()} className="shrink-0 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-teal-200 hover:bg-teal-50 hover:text-[#0d7377] md:hidden">Salir</button>
+                        <span className="hidden shrink-0 items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 sm:inline-flex"><span className="h-2 w-2 rounded-full bg-emerald-500" />Sesión activa</span>
+                    </header>
+                    <div className="min-h-0 flex-1">{renderCurrentView()}</div>
+                    <footer className="px-5 pb-5 pt-2 text-center text-[11px] text-slate-400 md:px-2">© 2026 Senior-Manage · Cuidado que conecta</footer>
+                </main>
+            </div>
         </div>
     );
 };

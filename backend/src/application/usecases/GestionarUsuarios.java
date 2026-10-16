@@ -82,6 +82,15 @@ public class GestionarUsuarios {
         return repositorio.actualizar(usuario);
     }
 
+    /** Sets a new password without exposing the existing hash or plaintext. */
+    public boolean establecerPassword(String correo, String password) {
+        if (correo == null || correo.isBlank() || password == null || password.isBlank()) return false;
+        Usuario usuario = repositorio.buscarPorCorreo(correo);
+        if (usuario == null) return false;
+        usuario.cambiarPasswordHash(passwordHasher.generarHash(password));
+        return repositorio.actualizar(usuario);
+    }
+
     // =========================================================
     // REGISTRAR USUARIO
     // =========================================================
