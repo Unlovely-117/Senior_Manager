@@ -7,7 +7,8 @@ COPY backend/pom.xml ./backend/pom.xml
 RUN mvn -B -q -f backend/pom.xml dependency:go-offline
 
 COPY backend/src ./backend/src
-RUN mvn -B -f backend/pom.xml -DskipTests compile dependency:copy-dependencies -DincludeScope=runtime
+RUN rm -f backend/src/infrastructure/bootstrap/ResetAdministratorPassword.java backend/src/infrastructure/ArchivoUsuarios.java backend/src/infrastructure/ArchivoProfesionales.java && \
+    mvn -B -f backend/pom.xml -DskipTests compile dependency:copy-dependencies -DincludeScope=runtime
 
 FROM eclipse-temurin:17-jre-jammy AS runtime
 WORKDIR /app

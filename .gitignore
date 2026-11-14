@@ -33,6 +33,7 @@ replay_pid*
 !.env.example
 !frontend/.env.example
 
-.DS_Store
 .vscode
-/.vscode
+.github
+.DS_Store
+.agent

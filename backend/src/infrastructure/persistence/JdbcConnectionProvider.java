@@ -6,7 +6,7 @@ import java.sql.SQLException;
 import java.util.Properties;
 
 /** Opens JDBC connections lazily. Requires the PostgreSQL JDBC driver at runtime. */
-public final class JdbcConnectionProvider {
+public final class JdbcConnectionProvider implements AutoCloseable {
     private final DatabaseConfiguration configuration;
 
     public JdbcConnectionProvider(DatabaseConfiguration configuration) { this.configuration = configuration; }
@@ -28,4 +28,7 @@ public final class JdbcConnectionProvider {
             properties.remove("password");
         }
     }
+
+    @Override
+    public void close() { }
 }

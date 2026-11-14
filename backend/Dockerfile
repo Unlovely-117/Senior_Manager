@@ -7,7 +7,8 @@ COPY pom.xml ./
 RUN mvn -B -q dependency:go-offline
 
 COPY src ./src
-RUN mvn -B -DskipTests compile dependency:copy-dependencies -DincludeScope=runtime
+RUN rm -f src/infrastructure/bootstrap/ResetAdministratorPassword.java src/infrastructure/ArchivoUsuarios.java src/infrastructure/ArchivoProfesionales.java && \
+    mvn -B -DskipTests compile dependency:copy-dependencies -DincludeScope=runtime
 
 FROM eclipse-temurin:17-jre-jammy AS runtime
 WORKDIR /app
