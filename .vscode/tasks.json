@@ -1,0 +1,339 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Create Senior Manager recovery administrator",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"backend\\scripts\\create-recovery-admin.ps1"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "List local PostgreSQL databases",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-NoExit",
+				"-Command",
+				"& 'C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe' -h localhost -p 5432 -U postgres -W -l"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Inspect databases before creating app DB",
+			"type": "shell",
+			"command": "C:\\PROGRA~1\\PostgreSQL\\18\\bin\\psql.exe",
+			"args": [
+				"-h",
+				"localhost",
+				"-p",
+				"5432",
+				"-U",
+				"postgres",
+				"-W",
+				"-l"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Check PostgreSQL database names",
+			"type": "shell",
+			"command": "C:\\PROGRA~1\\PostgreSQL\\18\\bin\\psql.exe",
+			"args": [
+				"-h",
+				"localhost",
+				"-p",
+				"5432",
+				"-U",
+				"postgres",
+				"-W",
+				"-l"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Inspect Senior Manager PostgreSQL databases",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-NoExit",
+				"-Command",
+				"$secure = Read-Host 'Contrasena del usuario postgres (entrada oculta)' -AsSecureString; $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure); try { $env:PGPASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }; try { & 'C:\\PROGRA~1\\PostgreSQL\\18\\bin\\psql.exe' -X -h localhost -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -c \"SELECT datname AS base FROM pg_database WHERE datistemplate = false ORDER BY datname;\"; if ($LASTEXITCODE -ne 0) { throw 'No se pudo consultar pg_database.' }; $dbs = & 'C:\\PROGRA~1\\PostgreSQL\\18\\bin\\psql.exe' -X -h localhost -p 5432 -U postgres -d postgres -At -v ON_ERROR_STOP=1 -c \"SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;\"; foreach ($db in $dbs) { $match = & 'C:\\PROGRA~1\\PostgreSQL\\18\\bin\\psql.exe' -X -h localhost -p 5432 -U postgres -d $db -At -v ON_ERROR_STOP=1 -c \"SELECT to_regclass('public.usuarios') IS NOT NULL AND to_regclass('public.permisos_rol') IS NOT NULL;\" 2>$null; if ($LASTEXITCODE -eq 0 -and $match -eq 't') { Write-Output \"SENIOR_MANAGER_SCHEMA=$db\" } }; } finally { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue }"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "List PostgreSQL databases read-only",
+			"type": "shell",
+			"command": "C:\\PROGRA~1\\PostgreSQL\\18\\bin\\psql.exe",
+			"args": [
+				"-X",
+				"-h",
+				"localhost",
+				"-p",
+				"5432",
+				"-U",
+				"postgres",
+				"-W",
+				"-l"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Check Senior Manager database readiness",
+			"type": "shell",
+			"command": "C:\\PROGRA~1\\PostgreSQL\\18\\bin\\psql.exe",
+			"args": [
+				"-X",
+				"-h",
+				"localhost",
+				"-p",
+				"5432",
+				"-U",
+				"senior_manager_app",
+				"-W",
+				"-d",
+				"senior_manager_migration_dev",
+				"-v",
+				"ON_ERROR_STOP=1",
+				"-c",
+				"SELECT current_database() AS database, current_user AS db_user;",
+				"-c",
+				"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;",
+				"-c",
+				"SELECT to_regclass('public.usuarios') IS NOT NULL AS has_users, to_regclass('public.permisos_rol') IS NOT NULL AS has_permissions, to_regclass('public.permission_bootstrap_state') IS NOT NULL AS has_bootstrap_marker, to_regclass('public.flyway_schema_history') IS NOT NULL AS has_flyway_history;",
+				"-c",
+				"SELECT CASE WHEN to_regclass('public.usuarios') IS NULL THEN 'users table missing' ELSE (SELECT 'users=' || count(*)::text || ', active_admins=' || count(*) FILTER (WHERE rol = 'ADMINISTRADOR' AND activo)::text FROM usuarios) END AS account_status;",
+				"-c",
+				"SELECT CASE WHEN to_regclass('public.permisos_rol') IS NULL THEN 'permissions table missing' ELSE (SELECT 'permission_rows=' || count(*)::text FROM permisos_rol) END AS permission_status;"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "List Senior Manager database tables",
+			"type": "shell",
+			"command": "C:\\PROGRA~1\\PostgreSQL\\18\\bin\\psql.exe",
+			"args": [
+				"-X",
+				"-h",
+				"localhost",
+				"-p",
+				"5432",
+				"-U",
+				"senior_manager_app",
+				"-W",
+				"-d",
+				"senior_manager_migration_dev",
+				"-c",
+				"\\dt"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Check database setup status",
+			"type": "shell",
+			"command": "C:\\PROGRA~1\\PostgreSQL\\18\\bin\\psql.exe",
+			"args": [
+				"-X",
+				"-h",
+				"localhost",
+				"-p",
+				"5432",
+				"-U",
+				"senior_manager_app",
+				"-W",
+				"-d",
+				"senior_manager_migration_dev",
+				"-v",
+				"ON_ERROR_STOP=1",
+				"-c",
+				"SELECT version, description, success FROM flyway_schema_history ORDER BY installed_rank;",
+				"-c",
+				"SELECT count(*) AS total_users, count(*) FILTER (WHERE rol = 'ADMINISTRADOR' AND activo) AS active_admins FROM usuarios;",
+				"-c",
+				"SELECT count(*) AS permission_rows FROM permisos_rol;",
+				"-c",
+				"SELECT count(*) AS bootstrap_markers FROM permission_bootstrap_state;"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Read-only database readiness check",
+			"type": "shell",
+			"command": "C:\\PROGRA~1\\PostgreSQL\\18\\bin\\psql.exe",
+			"args": [
+				"-X",
+				"-h",
+				"localhost",
+				"-p",
+				"5432",
+				"-U",
+				"senior_manager_app",
+				"-W",
+				"-d",
+				"senior_manager_migration_dev",
+				"-c",
+				"SELECT version, description, success FROM flyway_schema_history ORDER BY installed_rank;",
+				"-c",
+				"SELECT rol, activo, count(*) FROM usuarios GROUP BY rol, activo ORDER BY rol, activo;",
+				"-c",
+				"SELECT count(*) AS permission_rows FROM permisos_rol;",
+				"-c",
+				"SELECT count(*) AS bootstrap_markers FROM permission_bootstrap_state;"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Apply authorized V5 V6 migrations",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-NoExit",
+				"-Command",
+				"$env:JAVA_HOME=\"C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.20.101-hotspot\"; $env:PATH=\"$env:JAVA_HOME\\bin;$env:PATH\"; $env:SENIOR_MANAGE_JDBC_URL=\"jdbc:postgresql://localhost:5432/senior_manager_migration_dev\"; $env:SENIOR_MANAGE_DB_USERNAME=\"postgres\"; $secure=Read-Host password -AsSecureString; $ptr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure); try { $env:SENIOR_MANAGE_DB_PASSWORD=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }; mvn -f backend/pom.xml \"-Dsenior.manage.mainClass=infrastructure.migrations.ApplyMigrations\" exec:java; if ($LASTEXITCODE -ne 0) { Write-Error \"Flyway migrations failed; do not start the API yet.\" }"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Apply V5 V6 and app table grants",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"backend\\scripts\\_session_apply_authorized_migrations.ps1"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Verify migrated Senior Manager database",
+			"type": "shell",
+			"command": "C:\\PROGRA~1\\PostgreSQL\\18\\bin\\psql.exe",
+			"args": [
+				"-X",
+				"-h",
+				"localhost",
+				"-p",
+				"5432",
+				"-U",
+				"senior_manager_app",
+				"-W",
+				"-d",
+				"senior_manager_migration_dev",
+				"-c",
+				"SELECT version, description, success FROM flyway_schema_history ORDER BY installed_rank;",
+				"-c",
+				"SELECT rol, activo, count(*) FROM usuarios GROUP BY rol, activo ORDER BY rol, activo;",
+				"-c",
+				"SELECT count(*) FROM permisos_rol;",
+				"-c",
+				"SELECT count(*) FROM catalogo_ejercicios;",
+				"-c",
+				"SELECT count(*) FROM planes_ejercicios;"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Start Senior Manager backend locally",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-NoExit",
+				"-Command",
+				"$ErrorActionPreference='Stop'; $env:JAVA_HOME='C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.20.101-hotspot'; $env:PATH=\"$($env:JAVA_HOME)\\bin;$env:PATH\"; $env:SENIOR_MANAGE_JDBC_URL='jdbc:postgresql://localhost:5432/senior_manager_migration_dev'; $env:SENIOR_MANAGE_DB_USERNAME='senior_manager_app'; $secure=Read-Host 'PostgreSQL password for senior_manager_app' -AsSecureString; $ptr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure); try { $env:SENIOR_MANAGE_DB_PASSWORD=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }; $secretBytes=New-Object byte[] 32; [System.Security.Cryptography.RandomNumberGenerator]::Fill($secretBytes); $env:SENIOR_MANAGE_JWT_SECRET=[Convert]::ToBase64String($secretBytes); [Array]::Clear($secretBytes,0,$secretBytes.Length); $env:SENIOR_MANAGE_JWT_KEY_ID='local-session-key'; $env:SENIOR_MANAGE_JWT_ISSUER='senior-manager-local'; $env:SENIOR_MANAGE_JWT_AUDIENCE='senior-manager-local'; mvn -f backend/pom.xml exec:java"
+			],
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Run Senior Manager local API",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"backend\\scripts\\start-local-api.ps1"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Create authorized Senior Manager admin",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"backend\\scripts\\create-recovery-admin.ps1"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Verify existing administrator account",
+			"type": "shell",
+			"command": "C:\\PROGRA~1\\PostgreSQL\\18\\bin\\psql.exe",
+			"args": [
+				"-X",
+				"-h",
+				"localhost",
+				"-p",
+				"5432",
+				"-U",
+				"senior_manager_app",
+				"-W",
+				"-d",
+				"senior_manager_migration_dev",
+				"-v",
+				"ON_ERROR_STOP=1",
+				"-c",
+				"SELECT correo, rol, activo FROM usuarios WHERE correo_normalizado = lower(trim($$david.lopez@gmail.com$$));"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Reset existing admin login password",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"backend\\scripts\\reset-admin-password.ps1"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}

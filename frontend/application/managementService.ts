@@ -18,6 +18,7 @@ export {
     listPatientAssignments,
     listPatientAssignmentDirectory,
     listRolePermissions,
+    listMyPermissions,
     setProfessionalPermission,
     assignPatientProfessional,
     endPatientAssignment,

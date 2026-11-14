@@ -219,6 +219,9 @@ export function listPatientAssignmentDirectory(filters: {
 export function listRolePermissions(role: AccountRole): Promise<RolePermission[]> {
     return request(`/permisos/${encodeURIComponent(role)}`);
 }
+export function listMyPermissions(): Promise<RolePermission[]> {
+    return request('/permisos/mis-permisos');
+}
 export async function setProfessionalPermission(module: string, operation: string, allowed: boolean): Promise<void> {
     await request<ApiMessage>(`/permisos/professional/${encodeURIComponent(module)}/${encodeURIComponent(operation)}`, {
         method: 'PUT', values: { allowed },

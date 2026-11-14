@@ -5,8 +5,6 @@ import domain.entities.Rol;
 import domain.entities.Usuario;
 import shared.security.PasswordHasher;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.List;
 
 // Esta clase contiene los casos de uso relacionados con la gestión de usuarios.
@@ -25,6 +23,9 @@ import java.util.List;
 // Para eso utiliza el repositorio.
 public class GestionarUsuarios {
 
+    private static final String DUMMY_HASH =
+        new PasswordHasher().generarHash("dummy-password-for-timing-mitigation");
+
     // Repositorio que utilizaremos para guardar y consultar usuarios.
     private final RepositorioUsuarios repositorio;
     private final PasswordHasher passwordHasher;
@@ -40,32 +41,25 @@ public class GestionarUsuarios {
     }
 
     public Usuario autenticarUsuario(String correo, String password) {
-        if (correo == null || correo.isBlank() || password == null || password.isBlank()) {
+        if (correo == null || correo.isBlank() || password == null || password.isBlank() || password.length() > 128) {
             return null;
         }
 
         Usuario usuario = repositorio.buscarPorCorreo(correo);
         if (usuario == null || !usuario.isActivo()) {
+            passwordHasher.verificarPassword(password, DUMMY_HASH);
             return null;
         }
 
         String storedPassword = usuario.getPasswordHash();
-        boolean validPassword;
-        if (storedPassword.startsWith("PBKDF2-SHA256$")
-                || passwordHasher.esHashTemporal(storedPassword)) {
-            validPassword = passwordHasher.verificarPassword(password, storedPassword);
-        } else {
-            validPassword = MessageDigest.isEqual(
-                password.getBytes(StandardCharsets.UTF_8),
-                storedPassword.getBytes(StandardCharsets.UTF_8)
-            );
-            if (validPassword) {
-                usuario.cambiarPasswordHash(passwordHasher.generarHash(password));
-                repositorio.actualizar(usuario);
-            }
+        if (storedPassword == null
+                || (!storedPassword.startsWith("PBKDF2-SHA256$")
+                    && !passwordHasher.esHashTemporal(storedPassword))) {
+            passwordHasher.verificarPassword(password, DUMMY_HASH);
+            return null;
         }
 
-        return validPassword ? usuario : null;
+        return passwordHasher.verificarPassword(password, storedPassword) ? usuario : null;
     }
 
     public boolean cambiarPassword(String correo, String password) {

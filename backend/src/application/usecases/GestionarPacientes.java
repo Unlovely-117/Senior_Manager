@@ -27,6 +27,7 @@ public final class GestionarPacientes {
     public List<Paciente> listarHistoricosAsignados(String profesionalEmail) { return repositorio.listarInactivosAsignadosA(profesionalEmail); }
     public boolean actualizar(UUID id, String nombre, String documento, LocalDate nacimiento,
             String telefono, String direccion, String observaciones) {
+        Paciente.validarDatosRegistro(nombre, documento, nacimiento, telefono, direccion, observaciones);
         Paciente actual = repositorio.buscarPorId(id).orElse(null);
         if (actual == null) return false;
         if (!actual.isActivo()) throw new IllegalStateException("No se puede actualizar un paciente inactivo.");

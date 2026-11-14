@@ -12,10 +12,11 @@ import javax.crypto.spec.PBEKeySpec;
 public class PasswordHasher {
 
     private static final String TEMPORARY_PASSWORD_PREFIX = "TEMPORARY$";
+    private static final int MAX_PASSWORD_LENGTH = 128;
 
     // Cantidad de iteraciones utilizadas por PBKDF2.
     // Entre más iteraciones, más difícil resulta atacar el hash.
-    private static final int ITERACIONES = 65536;
+    private static final int ITERACIONES = 210000;
 
     // Tamaño de la clave generada, expresado en bits.
     private static final int LONGITUD_CLAVE = 256;
@@ -30,10 +31,15 @@ public class PasswordHasher {
     // Genera un hash seguro para una contraseña.
     public String generarHash(String password) {
 
-        // Verificamos que la contraseña exista.
+        // Verificamos que la contraseña exista y no exceda el máximo permitido.
         if (password == null || password.isBlank()) {
             throw new IllegalArgumentException(
                 "La contraseña no puede estar vacía."
+            );
+        }
+        if (password.length() > MAX_PASSWORD_LENGTH) {
+            throw new IllegalArgumentException(
+                "La contraseña no puede superar " + MAX_PASSWORD_LENGTH + " caracteres."
             );
         }
 
@@ -104,7 +110,7 @@ public class PasswordHasher {
             String hashAlmacenado) {
 
         // Validamos los datos recibidos.
-        if (password == null || hashAlmacenado == null) {
+        if (password == null || hashAlmacenado == null || password.length() > MAX_PASSWORD_LENGTH) {
             return false;
         }
 

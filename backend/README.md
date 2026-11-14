@@ -1,4 +1,4 @@
-﻿# Backend Senior-Manager
+# Backend Senior-Manager
 
 ## Version de Java
 
@@ -39,7 +39,7 @@ La verificacion de `GET /api/health` devuelve estado `ok` solo cuando la conexio
 
 ## Inicializacion unica de permisos
 
-La matriz aprobada para esta inicializacion esta en `config/permission-matrix-approved.csv`; su SHA-256 aprobado es `C6AF77260919E4E78568F306F95044B01B2355CCFC66D24AAEFE0CBC3AE210F8`. Antes de ejecutar, configura en la terminal local las variables PostgreSQL `SENIOR_MANAGE_JDBC_URL`, `SENIOR_MANAGE_DB_USERNAME`, `SENIOR_MANAGE_DB_PASSWORD`, el secreto aleatorio externo de al menos 32 bytes `SENIOR_MANAGE_PERMISSION_BOOTSTRAP_SECRET` y `SENIOR_MANAGE_PERMISSION_MATRIX_SHA256` con esa huella. No guardes esos valores en el repositorio ni los compartas por chat. Con el esquema aplicado, Java 17 y Maven disponibles, desde la raiz del proyecto ejecuta:
+La matriz aprobada para esta inicializacion esta en `config/permission-matrix-approved.csv`; su SHA-256 aprobado es `6EDB8C419013B86D62BABAC0A9D1F9668918158AA332AA7BF5B46B9EE60FA969`. Antes de ejecutar, configura en la terminal local las variables PostgreSQL `SENIOR_MANAGE_JDBC_URL`, `SENIOR_MANAGE_DB_USERNAME`, `SENIOR_MANAGE_DB_PASSWORD`, el secreto aleatorio externo de al menos 32 bytes `SENIOR_MANAGE_PERMISSION_BOOTSTRAP_SECRET` y `SENIOR_MANAGE_PERMISSION_MATRIX_SHA256` con esa huella. No guardes esos valores en el repositorio ni los compartas por chat. Con el esquema aplicado, Java 17 y Maven disponibles, desde la raiz del proyecto ejecuta:
 
 ```powershell
 mvn -f backend/pom.xml "-Dsenior.manage.mainClass=infrastructure.bootstrap.PermissionBootstrap" exec:java "-Dexec.args=backend/config/permission-matrix-approved.csv"

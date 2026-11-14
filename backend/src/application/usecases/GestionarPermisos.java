@@ -10,7 +10,8 @@ import java.util.Set;
 /** Use case for administrator-only complete permission configuration updates. */
 public final class GestionarPermisos {
     private static final Set<String> CONFIGURABLE_PROFESSIONAL_PERMISSIONS = Set.of(
-        "PACIENTES/READ", "PACIENTES/HISTORY_READ", "ANTECEDENTES/READ",
+        "PACIENTES/READ", "PACIENTES/CREATE", "PACIENTES/UPDATE", "PACIENTES/HISTORY_READ",
+        "ANTECEDENTES/READ", "ANTECEDENTES/CREATE", "ANTECEDENTES/UPDATE",
         "CITAS/READ", "CITAS/CREATE", "CITAS/UPDATE", "CITAS/DELETE",
         "EJERCICIOS/READ", "EJERCICIOS/CREATE"
     );
@@ -42,7 +43,10 @@ public final class GestionarPermisos {
     /** Admins may tune only the predefined day-to-day permissions of professional accounts. */
     public void guardarPermisoProfesional(Rol actor, Rol target, Permiso permission) {
         requireAdministrator(actor);
-        requireEffectivePermission(actor, "READ");
+        if (!authorization.isAllowed(actor, "PERMISOS", "UPDATE", repositorio)
+                && !authorization.isAllowed(actor, "PERMISOS", "READ", repositorio)) {
+            throw new SecurityException("La configuración no autoriza esta operación de permisos.");
+        }
         if (target != Rol.PROFESIONAL || permission == null) {
             throw new SecurityException("Solo se pueden configurar permisos del rol Profesional.");
         }

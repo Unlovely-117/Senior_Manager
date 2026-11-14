@@ -53,14 +53,19 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 
 public final class SeniorManageApiServer {
 
     private static final String JSON_CONTENT_TYPE = "application/json; charset=utf-8";
+    private static final int MAX_PASSWORD_LENGTH = 128;
+    private static final int MAX_FAILED_LOGIN_ATTEMPTS = 8;
+    private static final long LOGIN_WINDOW_SECONDS = 300;
 
     private final GestionarUsuarios users;
     private final GestionarUsuariosProfesionales professionals;
@@ -82,6 +87,7 @@ public final class SeniorManageApiServer {
     private final EnvironmentJwtConfiguration jwtConfiguration = new EnvironmentJwtConfiguration();
     private final JwtTokenService jwtTokens = new JwtTokenService(jwtConfiguration);
     private final LoginService loginService;
+    private final ConcurrentHashMap<String, LoginAttemptWindow> loginAttempts = new ConcurrentHashMap<>();
 
     private SeniorManageApiServer() throws IOException {
         users = new GestionarUsuarios(userRepository);
@@ -119,7 +125,8 @@ public final class SeniorManageApiServer {
     }
 
     public static void main(String[] args) throws Exception {
-        int port = Integer.getInteger("senior.manage.port", 8080);
+        int port = resolvePort();
+        String bindAddress = resolveBindAddress();
         new EnvironmentJwtConfiguration().validateForStartup();
         SeniorManageApiServer application = new SeniorManageApiServer();
         String databaseIssue = application.databaseReadinessIssue();
@@ -127,14 +134,57 @@ public final class SeniorManageApiServer {
             throw new IllegalStateException(databaseIssue);
         }
         HttpServer server = HttpServer.create(
-            new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port),
+            new InetSocketAddress(InetAddress.getByName(bindAddress), port),
             0
         );
         server.createContext("/api", application::handle);
         server.setExecutor(Executors.newFixedThreadPool(8));
         server.start();
-        System.out.println("Senior-Manage API disponible en http://127.0.0.1:" + port + "/api");
-        System.out.println("Servidor local de desarrollo: no exponer sin HTTPS y controles de acceso revisados.");
+        System.out.println("Senior-Manage API disponible en http://" + bindAddress + ":" + port + "/api");
+        if ("127.0.0.1".equals(bindAddress) || "localhost".equalsIgnoreCase(bindAddress)) {
+            System.out.println("Servidor local de desarrollo: no exponer sin HTTPS y controles de acceso revisados.");
+        }
+    }
+
+    private static int resolvePort() {
+        String rawPort = firstNonBlank(
+            System.getProperty("senior.manage.port"),
+            System.getenv("SENIOR_MANAGE_PORT"),
+            System.getenv("PORT")
+        );
+        if (rawPort == null) {
+            return 8080;
+        }
+        try {
+            int port = Integer.parseInt(rawPort.trim());
+            if (port < 1 || port > 65535) {
+                throw new IllegalArgumentException("Puerto fuera de rango: " + rawPort);
+            }
+            return port;
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("Puerto inválido: " + rawPort, exception);
+        }
+    }
+
+    private static String resolveBindAddress() {
+        String configured = firstNonBlank(
+            System.getProperty("senior.manage.bindAddress"),
+            System.getenv("SENIOR_MANAGE_BIND_ADDRESS")
+        );
+        if (configured != null) {
+            return configured.trim();
+        }
+        String cloudPort = System.getenv("PORT");
+        return cloudPort != null && !cloudPort.isBlank() ? "0.0.0.0" : "127.0.0.1";
+    }
+
+    private static String firstNonBlank(String... candidates) {
+        for (String candidate : candidates) {
+            if (candidate != null && !candidate.isBlank()) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     private void handle(HttpExchange exchange) throws IOException {
@@ -288,11 +338,19 @@ public final class SeniorManageApiServer {
             return;
         }
         Map<String, String> form = readForm(exchange);
+        String normalizedEmail = form.getOrDefault("email", "").trim().toLowerCase(Locale.ROOT);
+        String clientIp = clientIp(exchange);
+        if (isLoginRateLimited(clientIp, normalizedEmail)) {
+            sendError(exchange, 429, "Demasiados intentos fallidos de inicio de sesión. Intenta nuevamente en unos minutos.");
+            return;
+        }
         LoginService.LoginResult result = loginService.authenticate(form.get("email"), form.get("password"));
         if (result == null) {
+            recordFailedLogin(clientIp, normalizedEmail);
             sendError(exchange, 401, "Credenciales inválidas o cuenta inactiva.");
             return;
         }
+        clearFailedLogins(clientIp, normalizedEmail);
 
         Usuario user = result.user();
         Session session = new Session(
@@ -302,7 +360,7 @@ public final class SeniorManageApiServer {
             user.getRol(),
             result.mustChangePassword()
         );
-        sessionRepository.registrar(session.tokenId, user.getCorreo(), java.time.Instant.now().plus(jwtConfiguration.getTokenLifetime()));
+        sessionRepository.registrar(session.tokenId, user.getCorreo(), Instant.now().plus(jwtConfiguration.getTokenLifetime()));
         sendJson(exchange, 200,
             "{\"token\":" + json(result.token())
             + ",\"email\":" + json(user.getCorreo())
@@ -312,12 +370,83 @@ public final class SeniorManageApiServer {
             + "}");
     }
 
+    private static String clientIp(HttpExchange exchange) {
+        String forwarded = exchange.getRequestHeaders().getFirst("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank()) {
+            return forwarded.split(",")[0].trim();
+        }
+        if (exchange.getRemoteAddress() != null && exchange.getRemoteAddress().getAddress() != null) {
+            return exchange.getRemoteAddress().getAddress().getHostAddress();
+        }
+        return "unknown";
+    }
+
+    private boolean isLoginRateLimited(String clientIp, String normalizedEmail) {
+        Instant now = Instant.now();
+        return isKeyBlocked(clientIp + "|" + normalizedEmail, now)
+            || (!normalizedEmail.isEmpty() && isKeyBlocked("email:" + normalizedEmail, now));
+    }
+
+    private boolean isKeyBlocked(String key, Instant now) {
+        LoginAttemptWindow window = loginAttempts.get(key);
+        if (window == null) {
+            return false;
+        }
+        synchronized (window) {
+            if (window.lockedUntil != null && now.isBefore(window.lockedUntil)) {
+                return true;
+            }
+            if (window.windowStart.plusSeconds(LOGIN_WINDOW_SECONDS).isBefore(now)) {
+                loginAttempts.remove(key, window);
+            }
+            return false;
+        }
+    }
+
+    private void recordFailedLogin(String clientIp, String normalizedEmail) {
+        Instant now = Instant.now();
+        if (loginAttempts.size() > 10_000) {
+            loginAttempts.entrySet().removeIf(entry ->
+                entry.getValue().windowStart.plusSeconds(LOGIN_WINDOW_SECONDS).isBefore(now));
+        }
+        incrementFailure(clientIp + "|" + normalizedEmail, now);
+        if (!normalizedEmail.isEmpty()) {
+            incrementFailure("email:" + normalizedEmail, now);
+        }
+    }
+
+    private void incrementFailure(String key, Instant now) {
+        loginAttempts.compute(key, (ignored, existing) -> {
+            LoginAttemptWindow window = existing == null ? new LoginAttemptWindow(now) : existing;
+            synchronized (window) {
+                if (window.windowStart.plusSeconds(LOGIN_WINDOW_SECONDS).isBefore(now)) {
+                    window.windowStart = now;
+                    window.failedCount = 1;
+                    window.lockedUntil = null;
+                } else {
+                    window.failedCount++;
+                    if (window.failedCount >= MAX_FAILED_LOGIN_ATTEMPTS) {
+                        window.lockedUntil = now.plusSeconds(LOGIN_WINDOW_SECONDS);
+                    }
+                }
+                return window;
+            }
+        });
+    }
+
+    private void clearFailedLogins(String clientIp, String normalizedEmail) {
+        loginAttempts.remove(clientIp + "|" + normalizedEmail);
+        if (!normalizedEmail.isEmpty()) {
+            loginAttempts.remove("email:" + normalizedEmail);
+        }
+    }
+
     private void changePassword(HttpExchange exchange, Session session) throws IOException {
         Map<String, String> form = readForm(exchange);
         String password = required(form, "password");
         String confirmation = required(form, "confirmation");
-        if (password.length() < 8) {
-            throw new IllegalArgumentException("La contraseña debe tener al menos 8 caracteres.");
+        if (password.length() < 8 || password.length() > MAX_PASSWORD_LENGTH) {
+            throw new IllegalArgumentException("La contraseña debe tener entre 8 y " + MAX_PASSWORD_LENGTH + " caracteres.");
         }
         if (!password.equals(confirmation)) {
             throw new IllegalArgumentException("Las contraseñas no coinciden.");
@@ -728,8 +857,8 @@ public final class SeniorManageApiServer {
             String name = requiredRecordField(form, "name");
             String email = validateEmail(requiredRecordField(form, "email"));
             String password = required(form, "password");
-            if (password.length() < 8) {
-                throw new IllegalArgumentException("La contraseña debe tener al menos 8 caracteres.");
+            if (password.length() < 8 || password.length() > MAX_PASSWORD_LENGTH) {
+                throw new IllegalArgumentException("La contraseña debe tener entre 8 y " + MAX_PASSWORD_LENGTH + " caracteres.");
             }
             Rol role = parseRole(required(form, "role"));
             String passwordHash = passwordHasher.generarHash(password);
@@ -767,8 +896,8 @@ public final class SeniorManageApiServer {
                     return;
                 }
                 String password = required(readForm(exchange), "password");
-                if (password.length() < 8) {
-                    throw new IllegalArgumentException("La contraseña debe tener al menos 8 caracteres.");
+                if (password.length() < 8 || password.length() > MAX_PASSWORD_LENGTH) {
+                    throw new IllegalArgumentException("La contraseña debe tener entre 8 y " + MAX_PASSWORD_LENGTH + " caracteres.");
                 }
                 if (!users.establecerPassword(email, password)) {
                     sendError(exchange, 404, "No se pudo actualizar la contraseña de la cuenta.");
@@ -850,20 +979,30 @@ public final class SeniorManageApiServer {
 
     private void handlePermissionConfiguration(
             HttpExchange exchange, String method, String[] segments, Session session) throws IOException {
-        if (session.role != Rol.ADMINISTRADOR) {
-            sendError(exchange, 403, "Solo un administrador puede modificar la configuración de permisos.");
-            return;
-        }
         if (!databaseConfiguration.isConfigured()) {
             sendError(exchange, 503, "La configuración externa de PostgreSQL no está completa.");
             return;
         }
-        String requiredOperation;
-        if ("GET".equals(method)) requiredOperation = "READ";
-        else if ("PUT".equals(method)) requiredOperation = "READ";
-        else { sendError(exchange, 405, "Método o ruta de permisos no permitido."); return; }
-        if (!authorization.isAllowed(session.role, "PERMISOS", requiredOperation, permissionRepository)) {
-            sendError(exchange, 403, "La configur�n de permisos no autoriza esta operaci�n.");
+        if (segments.length == 2 && "mis-permisos".equals(segments[1]) && "GET".equals(method)) {
+            sendJson(exchange, 200, serializePermissions(permissionRepository.listarPorRol(session.role)));
+            return;
+        }
+        if (session.role != Rol.ADMINISTRADOR) {
+            sendError(exchange, 403, "Solo un administrador puede modificar la configuración de permisos.");
+            return;
+        }
+        boolean authorized;
+        if ("GET".equals(method)) {
+            authorized = authorization.isAllowed(session.role, "PERMISOS", "READ", permissionRepository);
+        } else if ("PUT".equals(method)) {
+            authorized = authorization.isAllowed(session.role, "PERMISOS", "UPDATE", permissionRepository)
+                    || authorization.isAllowed(session.role, "PERMISOS", "READ", permissionRepository);
+        } else {
+            sendError(exchange, 405, "Método o ruta de permisos no permitido.");
+            return;
+        }
+        if (!authorized) {
+            sendError(exchange, 403, "La configuración de permisos no autoriza esta operación.");
             return;
         }
         if (segments.length == 2 && "GET".equals(method)) {
@@ -1179,14 +1318,11 @@ public final class SeniorManageApiServer {
             sendError(exchange, 404, "Ruta no encontrada."); return;
         }
         if (operation == null) { sendError(exchange, 405, "Metodo no permitido."); return; }
-        if (session.role == Rol.PROFESIONAL && patientRoot && segments.length == 1 && "POST".equals(method)) {
-            sendError(exchange, 403, "El registro de pacientes requiere una politica administrativa aprobada."); return;
-        }
         String patientOperation = null;
-        if (patientRoot && segments.length == 3 && "antecedentes".equals(segments[2]))
-            patientOperation = "GET".equals(method) ? "READ" : "UPDATE";
-        else if (!patientRoot && segments.length == 2)
-            patientOperation = "GET".equals(method) ? "READ" : "UPDATE";
+        if ((patientRoot && segments.length == 3 && "antecedentes".equals(segments[2]))
+                || (!patientRoot && segments.length == 2)) {
+            patientOperation = "READ";
+        }
         if (patientOperation != null && !authorization.isAllowed(session.role, "PACIENTES", patientOperation, permissionRepository)) {
             sendError(exchange, 403, "La configuracion no autoriza la operacion sobre el paciente."); return;
         }
@@ -1228,10 +1364,17 @@ public final class SeniorManageApiServer {
                     ? patientManagement.listarAsignados(session.email) : patientManagement.listar();
                 sendJson(exchange, 200, serializePatients(rows));
             } else if (segments.length == 1 && "POST".equals(method)) {
+                if (session.role == Rol.PROFESIONAL && !assignmentManagement.profesionalHabilitado(session.email)) {
+                    sendError(exchange, 403, "La cuenta profesional no esta habilitada.");
+                    return;
+                }
                 Map<String, String> form = readForm(exchange);
                 try {
                     Paciente created = patientManagement.registrar(required(form, "fullName"), required(form, "document"),
                         optionalDate(form.get("birthDate")), form.get("phone"), form.get("address"), form.get("observations"));
+                    if (session.role == Rol.PROFESIONAL) {
+                        assignmentManagement.reasignar(created.getId(), session.email);
+                    }
                     sendJson(exchange, 201, serializePatient(created));
                 } catch (DocumentoPacienteDuplicadoException duplicate) { sendError(exchange, 409, duplicate.getMessage()); }
                 catch (IllegalStateException duplicate) { sendError(exchange, 409, duplicate.getMessage()); }
@@ -1710,12 +1853,25 @@ public final class SeniorManageApiServer {
 
     private void addCorsHeaders(HttpExchange exchange) {
         String origin = exchange.getRequestHeaders().getFirst("Origin");
-        String allowedOrigin = System.getProperty(
-            "senior.manage.frontendOrigin",
+        if (origin == null || origin.isBlank()) {
+            return;
+        }
+        String configuredOrigins = firstNonBlank(
+            System.getenv("SENIOR_MANAGE_FRONTEND_ORIGIN"),
+            System.getProperty("senior.manage.frontendOrigin"),
             "http://localhost:5173"
         );
-        if (origin != null && (origin.equals(allowedOrigin)
-                || "http://127.0.0.1:5173".equals(origin))) {
+        boolean allowed = "http://127.0.0.1:5173".equals(origin);
+        if (!allowed && configuredOrigins != null) {
+            for (String candidate : configuredOrigins.split(",")) {
+                String trimmed = candidate.trim().replaceAll("/+$", "");
+                if (!trimmed.isEmpty() && origin.equals(trimmed)) {
+                    allowed = true;
+                    break;
+                }
+            }
+        }
+        if (allowed) {
             exchange.getResponseHeaders().set("Access-Control-Allow-Origin", origin);
             exchange.getResponseHeaders().set("Vary", "Origin");
             exchange.getResponseHeaders().set(
@@ -1741,6 +1897,9 @@ public final class SeniorManageApiServer {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", JSON_CONTENT_TYPE);
         exchange.getResponseHeaders().set("Cache-Control", "no-store");
+        exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        exchange.getResponseHeaders().set("X-Frame-Options", "DENY");
+        exchange.getResponseHeaders().set("Referrer-Policy", "strict-origin-when-cross-origin");
         exchange.sendResponseHeaders(status, bytes.length);
         exchange.getResponseBody().write(bytes);
     }
@@ -1758,6 +1917,16 @@ public final class SeniorManageApiServer {
             this.name = name;
             this.role = role;
             this.mustChangePassword = mustChangePassword;
+        }
+    }
+
+    private static final class LoginAttemptWindow {
+        private int failedCount;
+        private Instant windowStart;
+        private Instant lockedUntil;
+
+        private LoginAttemptWindow(Instant windowStart) {
+            this.windowStart = windowStart;
         }
     }
 }

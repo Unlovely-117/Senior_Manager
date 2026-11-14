@@ -1,26 +1,51 @@
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
 
 import application.usecases.GestionarUsuarios;
 
+import domain.RepositorioUsuarios;
 import domain.entities.Rol;
 import domain.entities.Usuario;
-
-import infrastructure.ArchivoUsuarios;
+import shared.security.PasswordHasher;
 
 // Clase utilizada para probar las operaciones de GestionarUsuarios.
 // Esta clase no pertenece a la aplicación final.
 // Su objetivo es comprobar que el módulo funciona correctamente.
 public class PruebaGestionarUsuarios {
 
+    private static final class MemoryUsuarios implements RepositorioUsuarios {
+        private final List<Usuario> usuarios = new ArrayList<>();
+
+        @Override public void guardar(Usuario usuario) { usuarios.add(usuario); }
+        @Override public List<Usuario> listar() { return new ArrayList<>(usuarios); }
+        @Override public Usuario buscarPorCorreo(String correo) {
+            if (correo == null || correo.isBlank()) return null;
+            return usuarios.stream().filter(u -> u.getCorreo().equalsIgnoreCase(correo.trim())).findFirst().orElse(null);
+        }
+        @Override public boolean actualizar(Usuario usuario) { return actualizar(usuario.getCorreo(), usuario); }
+        @Override public boolean actualizar(String correoActual, Usuario usuario) {
+            for (int i = 0; i < usuarios.size(); i++) {
+                if (usuarios.get(i).getCorreo().equalsIgnoreCase(correoActual)) {
+                    usuarios.set(i, usuario);
+                    return true;
+                }
+            }
+            return false;
+        }
+        @Override public boolean eliminar(String correo) {
+            return usuarios.removeIf(u -> u.getCorreo().equalsIgnoreCase(correo));
+        }
+    }
+
     public static void main(String[] args) {
 
         // Scanner permite leer información desde la terminal.
         Scanner scanner = new Scanner(System.in);
 
-        // Creamos el repositorio que se encargará de guardar
-        // y consultar los usuarios en el archivo TXT.
-        ArchivoUsuarios repositorio = new ArchivoUsuarios();
+        // Repositorio en memoria para evitar persistencia en archivos TXT.
+        RepositorioUsuarios repositorio = new MemoryUsuarios();
+        PasswordHasher passwordHasher = new PasswordHasher();
 
         // Creamos el caso de uso y le entregamos el repositorio.
         GestionarUsuarios gestion =
@@ -40,9 +65,6 @@ public class PruebaGestionarUsuarios {
         System.out.print("Correo: ");
         String correo = scanner.nextLine();
 
-        // Por ahora utilizamos un texto de prueba.
-        // Más adelante implementaremos almacenamiento seguro
-        // mediante hash de contraseña.
         System.out.print("Contraseña de prueba: ");
         String password = scanner.nextLine();
 
@@ -63,11 +85,11 @@ public class PruebaGestionarUsuarios {
             rol = Rol.ADMINISTRADOR;
         }
 
-        // Creamos el objeto Usuario.
+        // Creamos el objeto Usuario con hash seguro PBKDF2.
         Usuario usuario = new Usuario(
                 nombre,
                 correo,
-                password,
+                passwordHasher.generarHash(password),
                 rol
         );
 
