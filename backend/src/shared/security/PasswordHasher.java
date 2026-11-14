@@ -15,7 +15,7 @@ public class PasswordHasher {
 
     // Cantidad de iteraciones utilizadas por PBKDF2.
     // Entre más iteraciones, más difícil resulta atacar el hash.
-    private static final int ITERACIONES = 65536;
+    private static final int ITERACIONES = 600_000;
 
     // Tamaño de la clave generada, expresado en bits.
     private static final int LONGITUD_CLAVE = 256;
@@ -96,6 +96,18 @@ public class PasswordHasher {
     public boolean esHashTemporal(String hashAlmacenado) {
         return hashAlmacenado != null
             && hashAlmacenado.startsWith(TEMPORARY_PASSWORD_PREFIX);
+    }
+
+    /** Indica si el hash fue generado con menos iteraciones que la política actual y conviene rehacerlo. */
+    public boolean necesitaRehash(String hashAlmacenado) {
+        if (hashAlmacenado == null) return false;
+        String hash = esHashTemporal(hashAlmacenado)
+            ? hashAlmacenado.substring(TEMPORARY_PASSWORD_PREFIX.length())
+            : hashAlmacenado;
+        if (!hash.startsWith("PBKDF2-SHA256$")) return false;
+        String[] partes = hash.split("\\$");
+        if (partes.length != 4) return false;
+        try { return Integer.parseInt(partes[1]) < ITERACIONES; } catch (NumberFormatException invalido) { return false; }
     }
 
     // Verifica si una contraseña coincide con un hash almacenado.

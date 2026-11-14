@@ -16,6 +16,8 @@
         <postgresql.version>42.7.14</postgresql.version>
         <java-jwt.version>4.6.2</java-jwt.version>
         <flyway.version>12.6.0</flyway.version>
+        <hikaricp.version>5.1.0</hikaricp.version>
+        <junit-jupiter.version>5.10.2</junit-jupiter.version>
     </properties>
 
     <!-- Existing source tree is backend/src rather than Maven's src/main/java. -->
@@ -30,6 +32,11 @@
                 <configuration>
                     <release>${maven.compiler.release}</release>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
             </plugin>
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
@@ -69,6 +76,17 @@
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-database-postgresql</artifactId>
             <version>${flyway.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+            <version>${hikaricp.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit-jupiter.version}</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

@@ -43,4 +43,4 @@ export {
     listExercisePlans,
     assignExercisePlan,
 } from '../infrastructure/managementApi';
-export { ApiRequestError } from '../infrastructure/managementApi';
+export { ApiRequestError, ApiValidationError } from '../infrastructure/managementApi';

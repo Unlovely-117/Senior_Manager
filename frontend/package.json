@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
+    "test": "echo \"Sin framework de pruebas configurado todavía (ver tests/README.md)\" && exit 0",
     "preview": "vite preview"
   },
   "dependencies": {

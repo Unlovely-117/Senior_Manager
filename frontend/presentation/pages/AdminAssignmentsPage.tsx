@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react';
 import {
     assignPatientProfessional,
     endPatientAssignment,
@@ -8,6 +8,7 @@ import {
     ApiRequestError,
 } from '../../application/managementService';
 import type { PatientAssignment, PatientAssignmentSummary, Professional } from '../../domain/models/management';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 
 type AssignmentRow = PatientAssignmentSummary & { history: PatientAssignment[] | null };
 const PAGE_SIZE = 25;
@@ -34,8 +35,11 @@ export const AdminAssignmentsPage: FC = () => {
     const [total, setTotal] = useState(0);
     const [patientStatus, setPatientStatus] = useState<'ACTIVO' | 'INACTIVO' | 'TODOS'>('ACTIVO');
     const [assignmentStatus, setAssignmentStatus] = useState<'ACTIVA' | 'FINALIZADA' | 'SIN_ASIGNACION' | 'TODAS'>('TODAS');
+    const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; danger: boolean; action: () => Promise<void> } | null>(null);
+    const requestSeq = useRef(0);
 
     const load = useCallback(async (preserveNotice = false) => {
+        const requestId = ++requestSeq.current;
         setLoading(true);
         setError('');
         if (!preserveNotice) setNotice('');
@@ -44,6 +48,7 @@ export const AdminAssignmentsPage: FC = () => {
                 listPatientAssignmentDirectory({ page, size: PAGE_SIZE, patientStatus, assignmentStatus }),
                 listProfessionals(),
             ]);
+            if (requestId !== requestSeq.current) return;
             const eligibleProfessionals = directory.filter((item) => item.accountLinked && item.hasProfile
                 && item.accountActive === true && item.profileActive === true);
             const assignmentRows: AssignmentRow[] = directoryPage.items.map((item) => ({ ...item, history: null }));
@@ -64,14 +69,18 @@ export const AdminAssignmentsPage: FC = () => {
                 return next;
             });
         } catch (cause) {
+            if (requestId !== requestSeq.current) return;
             setRows([]);
             setError(errorMessage(cause));
         } finally {
-            setLoading(false);
+            if (requestId === requestSeq.current) setLoading(false);
         }
     }, [page, patientStatus, assignmentStatus]);
 
-    useEffect(() => { void load(); }, [load]);
+    useEffect(() => {
+        void load();
+        return () => { requestSeq.current += 1; }; // Ignore responses from superseded loads.
+    }, [load]);
 
     const directoryByEmail = useMemo(
         () => new Map(professionals.map((item) => [item.email.toLowerCase(), item])),
@@ -99,60 +108,71 @@ export const AdminAssignmentsPage: FC = () => {
         catch (cause) { setError(errorMessage(cause)); }
     };
 
-    const applyAssignment = async (row: AssignmentRow) => {
+    const requestApplyAssignment = (row: AssignmentRow) => {
         const email = selection[row.patient.id];
         if (!email) return;
         const current = row.currentAssignment;
         const action = current ? 'reasignar este paciente' : 'asignar este paciente';
-        if (!window.confirm(`¿Confirmas ${action} a ${directoryByEmail.get(email.toLowerCase())?.name ?? email}? El historial se conservará.`)) return;
-
-        setSavingPatientId(row.patient.id);
-        setError('');
-        setNotice('');
-        try {
-            const updatedHistory = await assignPatientProfessional(row.patient.id, email);
-            setRows((prior) => prior.map((item) => item.patient.id === row.patient.id ? { ...item, history: updatedHistory,
-                currentAssignment: updatedHistory.find((assignment) => assignment.active) ?? null,
-                lastAssignment: [...updatedHistory].reverse()[0] ?? null, assignmentState: 'ACTIVE' as const } : item));
-            await load(true);
-            setRows((prior) => prior.map((item) => item.patient.id === row.patient.id ? { ...item, history: updatedHistory } : item));
-            setNotice(`Asignación guardada para ${row.patient.fullName}.`);
-        } catch (cause) {
-            const outcomeUncertain = !(cause instanceof ApiRequestError) || cause.status >= 500 || cause.outcomeUncertain;
-            setError(outcomeUncertain
-                ? `${cause instanceof ApiRequestError ? `El servidor respondió HTTP ${cause.status}.` : 'Se perdió la conexión con el servidor.'} No se pudo confirmar el resultado; consulta el historial antes de reintentar.`
-                : errorMessage(cause));
-            if (outcomeUncertain) {
-                try { await refreshPatientHistory(row.patient.id); } catch { /* Preserve the uncertain outcome message. */ }
-            }
-        } finally {
-            setSavingPatientId(null);
-        }
+        setPendingConfirm({
+            title: current ? 'Reasignar paciente' : 'Asignar paciente',
+            message: `¿Confirmas ${action} a ${directoryByEmail.get(email.toLowerCase())?.name ?? email}? El historial se conservará.`,
+            danger: false,
+            action: async () => {
+                setSavingPatientId(row.patient.id);
+                setError('');
+                setNotice('');
+                try {
+                    const updatedHistory = await assignPatientProfessional(row.patient.id, email);
+                    setRows((prior) => prior.map((item) => item.patient.id === row.patient.id ? { ...item, history: updatedHistory,
+                        currentAssignment: updatedHistory.find((assignment) => assignment.active) ?? null,
+                        lastAssignment: [...updatedHistory].reverse()[0] ?? null, assignmentState: 'ACTIVE' as const } : item));
+                    await load(true);
+                    setRows((prior) => prior.map((item) => item.patient.id === row.patient.id ? { ...item, history: updatedHistory } : item));
+                    setNotice(`Asignación guardada para ${row.patient.fullName}.`);
+                } catch (cause) {
+                    const outcomeUncertain = !(cause instanceof ApiRequestError) || cause.status >= 500 || cause.outcomeUncertain;
+                    setError(outcomeUncertain
+                        ? `${cause instanceof ApiRequestError ? `El servidor respondió HTTP ${cause.status}.` : 'Se perdió la conexión con el servidor.'} No se pudo confirmar el resultado; consulta el historial antes de reintentar.`
+                        : errorMessage(cause));
+                    if (outcomeUncertain) {
+                        try { await refreshPatientHistory(row.patient.id); } catch { /* Preserve the uncertain outcome message. */ }
+                    }
+                } finally {
+                    setSavingPatientId(null);
+                }
+            },
+        });
     };
 
-    const finishAssignment = async (row: AssignmentRow, current: PatientAssignment) => {
-        if (!window.confirm(`¿Finalizar la asignación de ${row.patient.fullName} a ${current.professionalEmail}? El historial se conservará.`)) return;
-        setSavingPatientId(row.patient.id);
-        setError('');
-        setNotice('');
-        try {
-            const updatedHistory = await endPatientAssignment(row.patient.id);
-            setRows((prior) => prior.map((item) => item.patient.id === row.patient.id ? { ...item, history: updatedHistory,
-                currentAssignment: null, lastAssignment: [...updatedHistory].reverse()[0] ?? null, assignmentState: 'FINALIZED' as const } : item));
-            await load(true);
-            setRows((prior) => prior.map((item) => item.patient.id === row.patient.id ? { ...item, history: updatedHistory } : item));
-            setNotice(`Asignación finalizada para ${row.patient.fullName}.`);
-        } catch (cause) {
-            const outcomeUncertain = !(cause instanceof ApiRequestError) || cause.status >= 500 || cause.outcomeUncertain;
-            setError(outcomeUncertain
-                ? `${cause instanceof ApiRequestError ? `El servidor respondió HTTP ${cause.status}.` : 'Se perdió la conexión con el servidor.'} No se pudo confirmar el resultado; consulta el historial antes de reintentar.`
-                : errorMessage(cause));
-            if (outcomeUncertain) {
-                try { await refreshPatientHistory(row.patient.id); } catch { /* Preserve the uncertain outcome message. */ }
-            }
-        } finally {
-            setSavingPatientId(null);
-        }
+    const requestFinishAssignment = (row: AssignmentRow, current: PatientAssignment) => {
+        setPendingConfirm({
+            title: 'Finalizar asignación',
+            message: `¿Finalizar la asignación de ${row.patient.fullName} a ${current.professionalEmail}? El historial se conservará.`,
+            danger: true,
+            action: async () => {
+                setSavingPatientId(row.patient.id);
+                setError('');
+                setNotice('');
+                try {
+                    const updatedHistory = await endPatientAssignment(row.patient.id);
+                    setRows((prior) => prior.map((item) => item.patient.id === row.patient.id ? { ...item, history: updatedHistory,
+                        currentAssignment: null, lastAssignment: [...updatedHistory].reverse()[0] ?? null, assignmentState: 'FINALIZED' as const } : item));
+                    await load(true);
+                    setRows((prior) => prior.map((item) => item.patient.id === row.patient.id ? { ...item, history: updatedHistory } : item));
+                    setNotice(`Asignación finalizada para ${row.patient.fullName}.`);
+                } catch (cause) {
+                    const outcomeUncertain = !(cause instanceof ApiRequestError) || cause.status >= 500 || cause.outcomeUncertain;
+                    setError(outcomeUncertain
+                        ? `${cause instanceof ApiRequestError ? `El servidor respondió HTTP ${cause.status}.` : 'Se perdió la conexión con el servidor.'} No se pudo confirmar el resultado; consulta el historial antes de reintentar.`
+                        : errorMessage(cause));
+                    if (outcomeUncertain) {
+                        try { await refreshPatientHistory(row.patient.id); } catch { /* Preserve the uncertain outcome message. */ }
+                    }
+                } finally {
+                    setSavingPatientId(null);
+                }
+            },
+        });
     };
 
     return (
@@ -223,10 +243,10 @@ export const AdminAssignmentsPage: FC = () => {
                                             {professionals.map((professional) => <option key={professional.email} value={professional.email}>{professional.name} · {professional.email}</option>)}
                                         </select>
                                     </label>
-                                    <button type="button" disabled={!row.patient.active || !selectedEmail || isCurrent || savingPatientId !== null} onClick={() => void applyAssignment(row)} className="rounded-lg bg-[#0d7377] px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+                                    <button type="button" disabled={!row.patient.active || !selectedEmail || isCurrent || savingPatientId !== null} onClick={() => requestApplyAssignment(row)} className="rounded-lg bg-[#0d7377] px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
                                         {savingPatientId === row.patient.id ? 'Guardando…' : active ? 'Reasignar' : 'Asignar'}
                                     </button>
-                                    {active && <button type="button" disabled={savingPatientId !== null} onClick={() => void finishAssignment(row, active)} className="rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-50">Finalizar</button>}
+                                    {active && <button type="button" disabled={savingPatientId !== null} onClick={() => requestFinishAssignment(row, active)} className="rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-50">Finalizar</button>}
                                 </div>
                             </div>
 
@@ -249,6 +269,15 @@ export const AdminAssignmentsPage: FC = () => {
                 <span>{total} pacientes</span>
                 <div className="flex gap-2"><button type="button" disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)} className="rounded border px-3 py-2 disabled:opacity-50">Anterior</button><span className="px-2 py-2">Página {page + 1} de {Math.max(1, Math.ceil(total / PAGE_SIZE))}</span><button type="button" disabled={(page + 1) * PAGE_SIZE >= total || loading} onClick={() => setPage((value) => value + 1)} className="rounded border px-3 py-2 disabled:opacity-50">Siguiente</button></div>
             </nav>
+
+            <ConfirmDialog
+                open={pendingConfirm !== null}
+                title={pendingConfirm?.title ?? ''}
+                message={pendingConfirm?.message ?? ''}
+                danger={pendingConfirm?.danger ?? false}
+                onConfirm={() => { const action = pendingConfirm?.action; setPendingConfirm(null); if (action) void action(); }}
+                onCancel={() => setPendingConfirm(null)}
+            />
         </section>
     );
 };

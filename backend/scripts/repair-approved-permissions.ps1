@@ -84,7 +84,7 @@ try {
     $env:SENIOR_MANAGE_PERMISSION_MATRIX_SHA256 = $approvedHash
     $repository = Join-Path $env:USERPROFILE '.m2\repository'
 
-    Write-Host 'Aplicando migraciones PostgreSQL V1-V5...'
+    Write-Host 'Aplicando migraciones PostgreSQL V1-V6...'
     $migrationArgs = @(
         "-Dmaven.repo.local=$repository", '-f', 'backend/pom.xml',
         '-Dsenior.manage.mainClass=infrastructure.migrations.ApplyMigrations', 'exec:java'

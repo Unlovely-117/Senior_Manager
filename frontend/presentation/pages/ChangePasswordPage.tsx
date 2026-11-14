@@ -7,6 +7,7 @@ interface ChangePasswordPageProps {
 }
 
 export const ChangePasswordPage: React.FC<ChangePasswordPageProps> = ({ name, onChanged }) => {
+    const [currentPassword, setCurrentPassword] = useState('');
     const [password, setPassword] = useState('');
     const [confirmation, setConfirmation] = useState('');
     const [error, setError] = useState('');
@@ -22,7 +23,7 @@ export const ChangePasswordPage: React.FC<ChangePasswordPageProps> = ({ name, on
 
         setIsSaving(true);
         try {
-            await changePassword(password, confirmation);
+            await changePassword(currentPassword, password, confirmation);
             onChanged();
         } catch (saveError) {
             setError(saveError instanceof Error ? saveError.message : 'No se pudo cambiar la contraseña.');
@@ -44,24 +45,36 @@ export const ChangePasswordPage: React.FC<ChangePasswordPageProps> = ({ name, on
                 <form onSubmit={handleSubmit} className="mt-6 space-y-4">
                     {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">{error}</p>}
                     <label className="block space-y-1.5 text-sm font-semibold text-gray-700">
+                        Contraseña temporal actual
+                        <input
+                            type="password"
+                            required
+                            autoComplete="current-password"
+                            value={currentPassword}
+                            onChange={(event) => setCurrentPassword(event.target.value)}
+                            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-sm font-normal text-gray-900 outline-none transition focus:border-teal-500 focus:bg-white focus:ring-4 focus:ring-teal-500/10"
+                        />
+                        <span className="block text-xs font-normal text-gray-500">Es la contraseña temporal que recibiste al ingresar.</span>
+                    </label>
+                    <label className="block space-y-1.5 text-sm font-semibold text-gray-700">
                         Nueva contraseña
                         <input
                             type="password"
                             required
-                            minLength={8}
+                            minLength={12}
                             autoComplete="new-password"
                             value={password}
                             onChange={(event) => setPassword(event.target.value)}
                             className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-sm font-normal text-gray-900 outline-none transition focus:border-teal-500 focus:bg-white focus:ring-4 focus:ring-teal-500/10"
                         />
-                        <span className="block text-xs font-normal text-gray-500">Usa al menos 8 caracteres.</span>
+                        <span className="block text-xs font-normal text-gray-500">Usa al menos 12 caracteres.</span>
                     </label>
                     <label className="block space-y-1.5 text-sm font-semibold text-gray-700">
                         Confirma la nueva contraseña
                         <input
                             type="password"
                             required
-                            minLength={8}
+                            minLength={12}
                             autoComplete="new-password"
                             value={confirmation}
                             onChange={(event) => setConfirmation(event.target.value)}

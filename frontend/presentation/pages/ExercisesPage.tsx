@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FC, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FC, type FormEvent } from 'react';
 import {
     assignExercisePlan,
     listExerciseCatalog,
@@ -24,18 +24,24 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
     const [saving, setSaving] = useState(false);
+    const requestSeq = useRef(0);
 
     const reload = useCallback(async () => {
+        const requestId = ++requestSeq.current;
         setLoading(true); setError('');
         try {
             const [currentPlans, completed, assignedPatients] = await Promise.all([
                 listExercisePlans(), listExerciseFollowUps(), readOnly ? Promise.resolve([] as Patient[]) : listPatients(),
             ]);
+            if (requestId !== requestSeq.current) return;
             setPlans(currentPlans); setHistory(completed); setPatients(assignedPatients);
-        } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudieron cargar los ejercicios.'); }
-        finally { setLoading(false); }
+        } catch (cause) { if (requestId === requestSeq.current) setError(cause instanceof Error ? cause.message : 'No se pudieron cargar los ejercicios.'); }
+        finally { if (requestId === requestSeq.current) setLoading(false); }
     }, [readOnly]);
-    useEffect(() => { void reload(); }, [reload]);
+    useEffect(() => {
+        void reload();
+        return () => { requestSeq.current += 1; }; // Ignore responses from superseded reloads.
+    }, [reload]);
 
     useEffect(() => {
         if (!patientId) { setCatalog([]); setExerciseId(''); return; }

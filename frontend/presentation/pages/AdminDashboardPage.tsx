@@ -60,14 +60,14 @@ export const AdminDashboardPage: FC<AdminDashboardPageProps> = ({ onNavigate }) 
 
             {loadError && (
                 <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-                    <span>No se pudieron cargar las estadisticas desde la API: {loadError}</span>
+                    <span>No se pudieron cargar las estadísticas desde la API: {loadError}</span>
                     <button type="button" onClick={() => setReloadKey((value) => value + 1)} disabled={isLoading} className="font-semibold underline disabled:opacity-50">Reintentar</button>
                 </div>
             )}
             {!loadError && (
                 <div className="flex justify-end">
                     <button type="button" onClick={() => setReloadKey((value) => value + 1)} disabled={isLoading} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-teal-200 hover:text-[#0d7377] disabled:cursor-wait disabled:opacity-50">
-                        {isLoading ? 'Actualizando...' : 'Actualizar estadisticas'}
+                        {isLoading ? 'Actualizando...' : 'Actualizar estadísticas'}
                     </button>
                 </div>
             )}

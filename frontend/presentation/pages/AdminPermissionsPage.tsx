@@ -30,9 +30,9 @@ const approvedPermissionCells: Record<AccountRole, ReadonlySet<string>> = {
 
 function errorMessage(error: unknown): string {
     if (error instanceof ApiRequestError) {
-        if (error.status === 401) return 'La sesion expiro. Inicia sesion nuevamente.';
-        if (error.status === 403) return 'El backend denego la operacion. Se requiere rol administrador y permiso PERMISOS/READ.';
-        if (error.status === 503) return 'La configuracion de permisos o PostgreSQL no esta disponible.';
+        if (error.status === 401) return 'La sesión expiró. Inicia sesión nuevamente.';
+        if (error.status === 403) return 'El backend denegó la operación. Se requiere rol administrador y permiso PERMISOS/READ.';
+        if (error.status === 503) return 'La configuración de permisos o PostgreSQL no está disponible.';
     }
     return error instanceof Error ? error.message : 'No fue posible consultar los permisos.';
 }
@@ -87,7 +87,7 @@ export const AdminPermissionsPage: FC = () => {
             </header>
 
             <div className="rounded-xl border border-teal-100 bg-teal-50 p-4 text-sm text-teal-950">
-                Los cambios aplican a todas las cuentas con rol Profesional. El acceso a pacientes permanece limitado a asignaciones vigentes. Los permisos de administrador y las funciones fuera de esta lista no se pueden modificar aqui.
+                Los cambios aplican a todas las cuentas con rol Profesional. El acceso a pacientes permanece limitado a asignaciones vigentes. Los permisos de administrador y las funciones fuera de esta lista no se pueden modificar aquí.
             </div>
             {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</div>}
             <label className="block max-w-xs text-xs font-semibold text-gray-600">Configuracion del rol
@@ -137,7 +137,7 @@ export const AdminPermissionsPage: FC = () => {
             {!loading && !error && additionalDecisions.length > 0 && <section className="space-y-3">
                 <div>
                     <h2 className="text-lg font-semibold text-gray-900">Otras decisiones devueltas por el backend</h2>
-                    <p className="text-sm text-gray-500">Se muestran para revision; no se pueden cambiar desde esta pantalla.</p>
+                    <p className="text-sm text-gray-500">Se muestran para revisión; no se pueden cambiar desde esta pantalla.</p>
                 </div>
                 <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm">
                     <table className="min-w-full divide-y divide-gray-100 text-left text-sm">
@@ -149,7 +149,7 @@ export const AdminPermissionsPage: FC = () => {
                     </table>
                 </div>
             </section>}
-            <p className="text-xs leading-5 text-gray-500">El backend valida cada cambio y lo persiste en PostgreSQL. La consulta y la edicion requieren una sesion de administrador con permiso PERMISOS/READ.</p>
+            <p className="text-xs leading-5 text-gray-500">El backend valida cada cambio y lo persiste en PostgreSQL. La consulta y la edición requieren una sesión de administrador con permiso PERMISOS/READ.</p>
         </section>
     );
 };

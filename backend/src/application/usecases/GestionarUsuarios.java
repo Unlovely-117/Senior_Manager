@@ -25,6 +25,10 @@ import java.util.List;
 // Para eso utiliza el repositorio.
 public class GestionarUsuarios {
 
+    // Hash ficticio para verificaciones dummy en autenticación (uniformiza tiempos de respuesta).
+    private static final PasswordHasher HASHER_FICTICIO = new PasswordHasher();
+    private static final String HASH_FICTICIO = HASHER_FICTICIO.generarHash("verificacion-uniforme-senior-manage");
+
     // Repositorio que utilizaremos para guardar y consultar usuarios.
     private final RepositorioUsuarios repositorio;
     private final PasswordHasher passwordHasher;
@@ -46,6 +50,8 @@ public class GestionarUsuarios {
 
         Usuario usuario = repositorio.buscarPorCorreo(correo);
         if (usuario == null || !usuario.isActivo()) {
+            // Verificación dummy para uniformizar el tiempo de respuesta y no revelar si el correo existe.
+            passwordHasher.verificarPassword(password, HASH_FICTICIO);
             return null;
         }
 
@@ -65,6 +71,12 @@ public class GestionarUsuarios {
             }
         }
 
+        // Moderniza a la política de iteraciones vigente tras un inicio de sesión correcto.
+        if (validPassword && passwordHasher.necesitaRehash(storedPassword)) {
+            usuario.cambiarPasswordHash(passwordHasher.generarHash(password));
+            repositorio.actualizar(usuario);
+        }
+
         return validPassword ? usuario : null;
     }
 
@@ -82,12 +94,12 @@ public class GestionarUsuarios {
         return repositorio.actualizar(usuario);
     }
 
-    /** Sets a new password without exposing the existing hash or plaintext. */
+    /** Sets a new temporary password that must be changed at next login. */
     public boolean establecerPassword(String correo, String password) {
         if (correo == null || correo.isBlank() || password == null || password.isBlank()) return false;
         Usuario usuario = repositorio.buscarPorCorreo(correo);
         if (usuario == null) return false;
-        usuario.cambiarPasswordHash(passwordHasher.generarHash(password));
+        usuario.cambiarPasswordHash(passwordHasher.generarHashTemporal(password));
         return repositorio.actualizar(usuario);
     }
 

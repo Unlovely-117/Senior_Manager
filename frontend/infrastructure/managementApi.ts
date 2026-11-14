@@ -24,6 +24,42 @@ export class ApiRequestError extends Error {
     }
 }
 
+/** Validation error (HTTP 422) carrying a field → message map from the backend. */
+export class ApiValidationError extends ApiRequestError {
+    constructor(message: string, public readonly fieldErrors: Record<string, string>) {
+        super(422, message);
+        this.name = 'ApiValidationError';
+    }
+}
+
+function toLowerKeys(payload: Record<string, unknown>): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(payload)) {
+        result[key.toLowerCase()] = value;
+    }
+    return result;
+}
+
+/** Extracts a field → message map and the general message from a 422-style payload (tolerant to casing). */
+function parseValidationError(raw: unknown): { message: string; fieldErrors: Record<string, string> } | null {
+    if (raw === null || typeof raw !== 'object') return null;
+    const payload = toLowerKeys(raw as Record<string, unknown>);
+    const rawErrors = payload['errors'];
+    if (rawErrors === null || typeof rawErrors !== 'object') return null;
+    const fieldErrors: Record<string, string> = {};
+    for (const [field, value] of Object.entries(rawErrors as Record<string, unknown>)) {
+        if (typeof value === 'string' && value.trim()) fieldErrors[field] = value;
+        else if (value !== null && typeof value === 'object') {
+            const message = (value as Record<string, unknown>)['message'];
+            if (typeof message === 'string' && message.trim()) fieldErrors[field] = message;
+        }
+    }
+    if (Object.keys(fieldErrors).length === 0) return null;
+    const error = typeof payload['error'] === 'string' ? payload['error'] : '';
+    const message = typeof payload['message'] === 'string' ? payload['message'] : '';
+    return { message: message || error || 'Revisa los datos del formulario.', fieldErrors };
+}
+
 function formBody(values: Record<string, string | boolean>): URLSearchParams {
     const body = new URLSearchParams();
     Object.entries(values).forEach(([key, value]) => body.set(key, String(value)));
@@ -49,11 +85,23 @@ async function request<T>(
         headers.set('Authorization', `Bearer ${token}`);
     }
 
-    const response = await fetch(`${API_BASE_URL}${path}`, {
-        method: options.method ?? 'GET',
-        headers,
-        body,
-    });
+    let response: Response;
+    try {
+        response = await fetch(`${API_BASE_URL}${path}`, {
+            method: options.method ?? 'GET',
+            headers,
+            body,
+            signal: AbortSignal.timeout(15000),
+        });
+    } catch (cause) {
+        if (cause instanceof DOMException && cause.name === 'TimeoutError') {
+            throw new ApiRequestError(0, 'No hay conexión con el servidor. La solicitud tardó demasiado en responder.');
+        }
+        if (cause instanceof TypeError) {
+            throw new ApiRequestError(0, 'No hay conexión con el servidor.');
+        }
+        throw cause instanceof Error ? cause : new ApiRequestError(0, 'No hay conexión con el servidor.');
+    }
 
     let payload: unknown;
     try {
@@ -67,7 +115,12 @@ async function request<T>(
             window.dispatchEvent(new Event('senior-manage:session-expired'));
         }
         const errorPayload = payload !== null && typeof payload === 'object' ? payload as ApiMessage : {};
-        throw new ApiRequestError(response.status, errorPayload.error ?? 'No fue posible completar la solicitud.');
+        const message = errorPayload.error ?? 'No fue posible completar la solicitud.';
+        const validation = parseValidationError(payload);
+        if (response.status === 422 && validation) {
+            throw new ApiValidationError(validation.message, validation.fieldErrors);
+        }
+        throw new ApiRequestError(response.status, message);
     }
     if (payload === undefined || payload === null || typeof payload !== 'object') {
         throw new ApiRequestError(response.status, 'La API devolvió una respuesta vacía o inválida.', true);
@@ -100,10 +153,10 @@ export async function signOut(): Promise<void> {
     }
 }
 
-export async function changePassword(password: string, confirmation: string): Promise<void> {
+export async function changePassword(currentPassword: string, password: string, confirmation: string): Promise<void> {
     await request<ApiMessage>('/auth/change-password', {
         method: 'POST',
-        values: { password, confirmation },
+        values: { currentPassword, password, confirmation },
     });
 }
 
@@ -252,7 +305,7 @@ export function updatePatientHistory(id: string, values: Omit<PatientHistory, 'i
     return request(`/antecedentes/${encodeURIComponent(id)}`, { method: 'PUT', values });
 }
 
-export interface ClinicalRecord { id: string; patientId: string; patientName: string; professionalId?: string; professionalName?: string; date: string; item: string; notes: string; }
+export interface ClinicalRecord { id: string; patientId: string; patientName: string; professionalId?: string; professionalName?: string; date: string; item: string; /** Notas: seguimientos clínicos (en citas el estado vive en `estado`). */ notes?: string; estado?: string; }
 export interface ExerciseCatalogItem { id: string; name: string; category: string; description: string; blocked: boolean; alerts: string[]; }
 export interface ExercisePlan { id: string; patientId: string; patientName: string; exerciseId: string; exerciseName: string; category: string; frequency: string; sets: number | null; repetitions: number | null; durationMinutes: number | null; notes: string; date: string; }
 export function listAppointments(): Promise<ClinicalRecord[]> { return request('/citas'); }

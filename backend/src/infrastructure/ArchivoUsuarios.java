@@ -5,6 +5,9 @@ import domain.entities.Usuario;
 import domain.entities.Rol;
 
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -185,138 +188,74 @@ public class ArchivoUsuarios implements RepositorioUsuarios {
     // Actualiza la información de un usuario existente.
     @Override
     public boolean actualizar(Usuario usuario) {
-
-        // Primero obtenemos todos los usuarios actuales.
-        List<Usuario> usuarios = listar();
-
-        // Esta variable nos permitirá saber si encontramos
-        // al usuario que queremos actualizar.
-        boolean encontrado = false;
-
-        // Recorremos la lista de usuarios.
-        for (int i = 0; i < usuarios.size(); i++) {
-
-            // Comparamos el correo del usuario almacenado
-            // con el correo del usuario que queremos actualizar.
-            if (usuarios.get(i)
-                    .getCorreo()
-                    .equalsIgnoreCase(usuario.getCorreo())) {
-
-                // Reemplazamos el usuario anterior
-                // por la versión actualizada.
-                usuarios.set(i, usuario);
-
-                // Indicamos que sí encontramos el usuario.
-                encontrado = true;
-
-                // Ya no necesitamos seguir recorriendo la lista.
-                break;
-            }
-        }
-
-        // Si no encontramos el usuario...
-        if (!encontrado) {
-
-            // ...informamos que la actualización no fue posible.
+        if (usuario == null || usuario.getCorreo() == null || usuario.getCorreo().isBlank()) {
             return false;
         }
-
-        // Si encontramos al usuario,
-        // volvemos a escribir el archivo completo
-        // con la información actualizada.
-        try (BufferedWriter escritor =
-                new BufferedWriter(new FileWriter(archivo))) {
-
-            // Recorremos todos los usuarios.
-            for (Usuario actual : usuarios) {
-
-                // Escribimos nuevamente sus datos en el archivo.
-                escritor.write(
-                    actual.getNombre() + ";" +
-                    actual.getCorreo() + ";" +
-                    actual.getPasswordHash() + ";" +
-                    actual.getRol().name() + ";" +
-                    actual.isActivo()
-                );
-
-                // Pasamos a la siguiente línea.
-                escritor.newLine();
-            }
-
-            // Indicamos que la actualización fue exitosa.
-            return true;
-
-        } catch (IOException e) {
-
-            // Si ocurre un error al escribir el archivo,
-            // informamos el problema.
-            throw new RuntimeException(
-                "No se pudo actualizar el usuario.", e
-            );
-        }
+        return actualizar(usuario.getCorreo(), usuario);
     }
 
-    // Actualiza un usuario identificando la cuenta por su correo actual.
     @Override
     public boolean actualizar(String correoActual, Usuario usuario) {
-
-        // Verificamos que el correo actual sea válido.
-        if (correoActual == null || correoActual.isBlank()) {
+        if (correoActual == null || correoActual.isBlank()
+                || usuario == null || usuario.getCorreo() == null || usuario.getCorreo().isBlank()) {
             return false;
         }
 
-        // Obtenemos todos los usuarios almacenados.
         List<Usuario> usuarios = listar();
-
-        // Buscamos el usuario por su correo actual.
-        boolean encontrado = false;
-
+        int indiceEncontrado = -1;
         for (int i = 0; i < usuarios.size(); i++) {
-
-            // Comparamos el correo almacenado con el correo actual.
-            if (usuarios.get(i).getCorreo().equalsIgnoreCase(correoActual)) {
-
-                // Reemplazamos el usuario anterior por la versión actualizada.
-                usuarios.set(i, usuario);
-
-                encontrado = true;
+            if (usuarios.get(i).getCorreo().trim().equalsIgnoreCase(correoActual.trim())) {
+                indiceEncontrado = i;
                 break;
             }
         }
-
-        // Si no encontramos el usuario, no hacemos cambios.
-        if (!encontrado) {
+        if (indiceEncontrado < 0) {
             return false;
         }
 
-        // Reescribimos el archivo con los usuarios actualizados.
-        try (BufferedWriter escritor =
-                new BufferedWriter(new FileWriter(archivo))) {
-
-            for (Usuario actual : usuarios) {
-
-                escritor.write(
-                    actual.getNombre() + ";" +
-                    actual.getCorreo() + ";" +
-                    actual.getPasswordHash() + ";" +
-                    actual.getRol().name() + ";" +
-                    actual.isActivo()
-                );
-
-                escritor.newLine();
+        for (int i = 0; i < usuarios.size(); i++) {
+            if (i != indiceEncontrado
+                    && usuarios.get(i).getCorreo().trim().equalsIgnoreCase(usuario.getCorreo().trim())) {
+                return false;
             }
+        }
 
-            return true;
+        usuarios.set(indiceEncontrado, usuario);
+        guardarTodos(usuarios);
+        return true;
+    }
 
+    private void guardarTodos(List<Usuario> usuarios) {
+        Path destino = archivo.toPath();
+        Path temporal = null;
+        try {
+            temporal = Files.createTempFile(destino.getParent(), "usuarios-", ".tmp");
+            try (BufferedWriter escritor = new BufferedWriter(new FileWriter(temporal.toFile()))) {
+                for (Usuario usuario : usuarios) {
+                    escritor.write(
+                        usuario.getNombre() + ";" +
+                        usuario.getCorreo() + ";" +
+                        usuario.getPasswordHash() + ";" +
+                        usuario.getRol().name() + ";" +
+                        usuario.isActivo()
+                    );
+                    escritor.newLine();
+                }
+            }
+            Files.move(temporal, destino, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
-
-            throw new RuntimeException(
-                "No se pudo actualizar el usuario.", e
-            );
+            if (temporal != null) {
+                try {
+                    Files.deleteIfExists(temporal);
+                } catch (IOException cleanupFailure) {
+                    e.addSuppressed(cleanupFailure);
+                }
+            }
+            throw new RuntimeException("No se pudo reescribir el archivo de usuarios.", e);
         }
     }
 
-    // =========================================================
+// =========================================================
     // ELIMINAR USUARIO
     // =========================================================
 
@@ -355,30 +294,7 @@ public class ArchivoUsuarios implements RepositorioUsuarios {
             return false;
         }
 
-        // Reescribimos el archivo con los usuarios restantes.
-        try (BufferedWriter escritor =
-                new BufferedWriter(new FileWriter(archivo))) {
-
-            for (Usuario actual : usuarios) {
-
-                escritor.write(
-                    actual.getNombre() + ";" +
-                    actual.getCorreo() + ";" +
-                    actual.getPasswordHash() + ";" +
-                    actual.getRol().name() + ";" +
-                    actual.isActivo()
-                );
-
-                escritor.newLine();
-            }
-
-            return true;
-
-        } catch (IOException e) {
-
-            throw new RuntimeException(
-                "No se pudo eliminar el usuario.", e
-            );
-        }
+        guardarTodos(usuarios);
+        return true;
     }
 }

@@ -42,7 +42,7 @@ public final class GestionarPermisos {
     /** Admins may tune only the predefined day-to-day permissions of professional accounts. */
     public void guardarPermisoProfesional(Rol actor, Rol target, Permiso permission) {
         requireAdministrator(actor);
-        requireEffectivePermission(actor, "READ");
+        requireEffectivePermission(actor, "UPDATE");
         if (target != Rol.PROFESIONAL || permission == null) {
             throw new SecurityException("Solo se pueden configurar permisos del rol Profesional.");
         }

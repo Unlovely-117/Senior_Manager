@@ -25,8 +25,8 @@ public final class PostgresRepositorioProfesionales implements RepositorioProfes
     @Override public void guardar(Profesional professional) {
         String sql = "INSERT INTO profesionales (id, nombre, documento, correo, telefono, activo, usuario_id, especialidad, "
             + "registro_profesional, formacion, experiencia, biografia, estado_verificacion) "
-            + "VALUES (?, ?, ?, ?, ?, ?, (SELECT id FROM usuarios WHERE correo_normalizado = lower(trim(?)) "
-            + "AND rol = 'PROFESIONAL'), ?, ?, ?, ?, ?, ?)";
+            + "SELECT ?, ?, ?, ?, ?, ?, u.id, ?, ?, ?, ?, ?, ? FROM usuarios u "
+            + "WHERE u.correo_normalizado = lower(trim(?)) AND u.rol = 'PROFESIONAL'";
         try (Connection c = connections.open(); PreparedStatement s = c.prepareStatement(sql)) {
             s.setObject(1, professional.getId());
             s.setString(2, professional.getNombre());
@@ -34,12 +34,16 @@ public final class PostgresRepositorioProfesionales implements RepositorioProfes
             s.setString(4, professional.getCorreo().trim());
             s.setString(5, professional.getTelefono());
             s.setBoolean(6, professional.isActivo());
-            s.setString(7, professional.getCorreo());
-            s.setString(8, professional.getEspecialidad()); s.setString(9, professional.getRegistroProfesional());
-            s.setString(10, professional.getFormacion()); s.setString(11, professional.getExperiencia());
-            s.setString(12, professional.getBiografia()); s.setString(13, professional.getEstadoVerificacion());
-            s.executeUpdate();
+            s.setString(7, professional.getEspecialidad()); s.setString(8, professional.getRegistroProfesional());
+            s.setString(9, professional.getFormacion()); s.setString(10, professional.getExperiencia());
+            s.setString(11, professional.getBiografia()); s.setString(12, professional.getEstadoVerificacion());
+            s.setString(13, professional.getCorreo());
+            int affected = s.executeUpdate();
+            if (affected == 0) {
+                throw new IllegalStateException("No existe una cuenta profesional con ese correo; crea primero la cuenta con rol Profesional.");
+            }
         } catch (SQLException e) {
+            if ("23505".equals(e.getSQLState())) throw new IllegalArgumentException("Ya existe una ficha profesional con ese documento.");
             throw new PersistenceException("No se pudo guardar la ficha profesional.", e);
         }
     }
@@ -118,6 +122,7 @@ public final class PostgresRepositorioProfesionales implements RepositorioProfes
             s.setObject(4, accountId);
             return s.executeUpdate() == 1;
         } catch (SQLException e) {
+            if ("23505".equals(e.getSQLState())) return false;
             throw new PersistenceException("No se pudo vincular la cuenta a la ficha profesional.", e);
         }
     }

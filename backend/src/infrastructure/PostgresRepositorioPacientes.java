@@ -56,31 +56,21 @@ public final class PostgresRepositorioPacientes implements RepositorioPacientes 
             }
         } catch (SQLException e) { throw new PersistenceException("No se pudieron consultar los pacientes.", e); }
     }
-    @Override public List<Paciente> listarActivosAsignadosA(String profesionalEmail) {
+    @Override public List<Paciente> listarActivosAsignadosA(String profesionalEmail) { return asignadosA(profesionalEmail, true); }
+    @Override public List<Paciente> listarInactivosAsignadosA(String profesionalEmail) { return asignadosA(profesionalEmail, false); }
+    private List<Paciente> asignadosA(String profesionalEmail, boolean activo) {
         String sql = "SELECT DISTINCT p.id, p.nombre_completo, p.documento, p.fecha_nacimiento, p.telefono, p.direccion, p.observaciones, p.activo "
             + "FROM pacientes p JOIN asignaciones_profesional_paciente a ON a.paciente_id = p.id "
             + "JOIN profesionales pr ON pr.id = a.profesional_id JOIN usuarios u ON u.id = pr.usuario_id "
-            + "WHERE p.activo = TRUE AND u.correo_normalizado = lower(trim(?)) AND u.rol = 'PROFESIONAL' AND u.activo = TRUE AND pr.activo = TRUE AND a.estado = 'ACTIVA' AND a.fecha_fin IS NULL "
+            + "WHERE p.activo = ? AND u.correo_normalizado = lower(trim(?)) AND u.rol = 'PROFESIONAL' AND u.activo = TRUE AND pr.activo = TRUE AND a.estado = 'ACTIVA' AND a.fecha_fin IS NULL "
             + "ORDER BY p.nombre_completo, p.id";
         try (Connection c = connections.open(); PreparedStatement s = c.prepareStatement(sql)) {
-            s.setString(1, profesionalEmail.trim().toLowerCase(java.util.Locale.ROOT));
+            s.setBoolean(1, activo);
+            s.setString(2, profesionalEmail.trim().toLowerCase(java.util.Locale.ROOT));
             try (ResultSet r = s.executeQuery()) {
                 List<Paciente> result = new ArrayList<>(); while (r.next()) result.add(map(r)); return result;
             }
         } catch (SQLException e) { throw new PersistenceException("No se pudieron consultar los pacientes asignados.", e); }
-    }
-    @Override public List<Paciente> listarInactivosAsignadosA(String profesionalEmail) {
-        String sql = "SELECT DISTINCT p.id, p.nombre_completo, p.documento, p.fecha_nacimiento, p.telefono, p.direccion, p.observaciones, p.activo "
-            + "FROM pacientes p JOIN asignaciones_profesional_paciente a ON a.paciente_id = p.id "
-            + "JOIN profesionales pr ON pr.id = a.profesional_id JOIN usuarios u ON u.id = pr.usuario_id "
-            + "WHERE p.activo = FALSE AND u.correo_normalizado = lower(trim(?)) AND u.rol = 'PROFESIONAL' AND u.activo = TRUE AND pr.activo = TRUE AND a.estado = 'ACTIVA' AND a.fecha_fin IS NULL "
-            + "ORDER BY p.nombre_completo, p.id";
-        try (Connection c = connections.open(); PreparedStatement s = c.prepareStatement(sql)) {
-            s.setString(1, profesionalEmail.trim().toLowerCase(java.util.Locale.ROOT));
-            try (ResultSet r = s.executeQuery()) {
-                List<Paciente> result = new ArrayList<>(); while (r.next()) result.add(map(r)); return result;
-            }
-        } catch (SQLException e) { throw new PersistenceException("No se pudieron consultar los pacientes historicos asignados.", e); }
     }
     @Override public boolean actualizar(Paciente p) {
         String sql = "UPDATE pacientes SET nombre_completo=?, documento=?, fecha_nacimiento=?, telefono=?, direccion=?, observaciones=?, activo=? WHERE id=?";

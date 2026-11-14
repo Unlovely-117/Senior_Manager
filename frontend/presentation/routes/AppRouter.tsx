@@ -103,6 +103,7 @@ export const AppRouter: React.FC = () => {
             setPassword('');
         } catch (error) {
             setLoginError(error instanceof Error ? error.message : 'No se pudo iniciar sesión.');
+            setPassword('');
         } finally {
             setIsSigningIn(false);
         }

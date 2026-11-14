@@ -23,7 +23,7 @@ Actualizado: 2026-10-16. Esta página resume el estado del código; la disponibi
 
 1. Instala JDK 17, Maven, Node.js/npm y PostgreSQL.
 2. Configura en el proceso del backend `SENIOR_MANAGE_JDBC_URL`, `SENIOR_MANAGE_DB_USERNAME`, `SENIOR_MANAGE_DB_PASSWORD` y las variables JWT requeridas.
-3. Aplica V1–V5 según `backend/migrations/README.md`.
+3. Aplica V1–V6 según `backend/migrations/README.md`.
 4. Aplica/inicializa la matriz aprobada según `backend/README.md`.
 5. Inicia el backend y frontend con los comandos del README principal. Confirma estado con `/api/health`.
 
