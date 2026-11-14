@@ -21,7 +21,7 @@ PostgreSQL (datos persistentes)
 - **Aplicación (`backend/src/application/`)**: casos de uso y coordinación de operaciones.
 - **Dominio (`backend/src/domain/`)**: entidades, contratos de repositorio y reglas independientes de HTTP/JDBC.
 - **Infraestructura (`backend/src/infrastructure/`)**: PostgreSQL/JDBC, JWT, migraciones, bootstrap y adaptadores técnicos.
-- **Migraciones (`backend/migrations/`)**: esquema versionado V1–V6. Flyway lo aplica de forma explícita; la API no cambia el esquema al arrancar.
+- **Migraciones (`backend/migrations/`)**: esquema versionado V1–V5. Flyway lo aplica de forma explícita; la API no cambia el esquema al arrancar.
 
 Las dependencias de las capas externas apuntan hacia contratos y reglas internas. Los componentes visuales no ejecutan SQL y los casos de uso no dependen de React ni del protocolo HTTP.
 

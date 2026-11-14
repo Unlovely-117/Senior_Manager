@@ -18,12 +18,9 @@ public final class PostgresRepositorioSesiones implements RepositorioSesiones {
 
     @Override public void registrar(UUID tokenId, String email, Instant expiresAt) {
         String sql = "INSERT INTO sesiones (jti, correo, expira_en, revocada_en) VALUES (?, ?, ?, NULL)";
-        try (Connection c = connections.open()) {
-            try (PreparedStatement cleanup = c.prepareStatement("DELETE FROM sesiones WHERE expira_en < now()")) { cleanup.executeUpdate(); }
-            try (PreparedStatement s = c.prepareStatement(sql)) {
-                s.setObject(1, tokenId); s.setString(2, email.trim().toLowerCase(java.util.Locale.ROOT));
-                s.setTimestamp(3, Timestamp.from(expiresAt)); s.executeUpdate();
-            }
+        try (Connection c = connections.open(); PreparedStatement s = c.prepareStatement(sql)) {
+            s.setObject(1, tokenId); s.setString(2, email.trim().toLowerCase(java.util.Locale.ROOT));
+            s.setTimestamp(3, Timestamp.from(expiresAt)); s.executeUpdate();
         } catch (SQLException e) { throw new PersistenceException("No se pudo registrar la sesión.", e); }
     }
 

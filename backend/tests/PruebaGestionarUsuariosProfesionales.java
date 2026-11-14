@@ -1,25 +1,49 @@
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Scanner;
 
 import application.usecases.GestionarUsuariosProfesionales;
 
+import domain.RepositorioProfesionales;
 import domain.entities.Profesional;
-
-import infrastructure.ArchivoProfesionales;
 
 // Clase utilizada para probar las operaciones de
 // GestionarUsuariosProfesionales.
 // Esta clase no pertenece a la aplicación final.
 // Su objetivo es comprobar que el módulo funciona correctamente.
 public class PruebaGestionarUsuariosProfesionales {
+
+    private static final class MemoryProfesionales implements RepositorioProfesionales {
+        private final List<Profesional> profesionales = new ArrayList<>();
+
+        @Override public void guardar(Profesional profesional) { profesionales.add(profesional); }
+        @Override public List<Profesional> listar() { return new ArrayList<>(profesionales); }
+        @Override public Profesional buscarPorDocumento(String documento) {
+            if (documento == null) return null;
+            return profesionales.stream().filter(p -> p.getDocumento().equals(documento)).findFirst().orElse(null);
+        }
+        @Override public boolean actualizar(Profesional profesional) {
+            for (int i = 0; i < profesionales.size(); i++) {
+                if (profesionales.get(i).getDocumento().equals(profesional.getDocumento())) {
+                    profesionales.set(i, profesional);
+                    return true;
+                }
+            }
+            return false;
+        }
+        @Override public boolean eliminar(String documento) {
+            return profesionales.removeIf(p -> p.getDocumento().equalsIgnoreCase(documento));
+        }
+    }
+
         public static void main(String[] args) {
 
         // Scanner permite leer información desde la terminal.
         Scanner scanner = new Scanner(System.in);
 
-        // Creamos el repositorio que guarda los profesionales
-        // en el archivo correspondiente.
-        ArchivoProfesionales repositorio =
-                new ArchivoProfesionales();
+        // Repositorio en memoria para evitar persistencia en archivos TXT.
+        RepositorioProfesionales repositorio =
+                new MemoryProfesionales();
 
         // Creamos el caso de uso y le entregamos el repositorio.
         GestionarUsuariosProfesionales gestion =

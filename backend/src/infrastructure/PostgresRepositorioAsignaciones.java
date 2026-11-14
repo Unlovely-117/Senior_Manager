@@ -89,40 +89,33 @@ public final class PostgresRepositorioAsignaciones implements RepositorioAsignac
             + "ORDER BY CASE WHEN x.estado='ACTIVA' AND x.fecha_fin IS NULL THEN 0 ELSE 1 END, x.fecha_inicio DESC, x.id DESC LIMIT 1) a ON TRUE "
             + "WHERE " + patientCondition + " AND " + assignmentCondition + " ORDER BY p.nombre_completo, p.id LIMIT ? OFFSET ?";
         try (Connection c = connections.open()) {
-            c.setAutoCommit(false);
-            try {
-                long total;
-                try (PreparedStatement count = c.prepareStatement(countSql)) {
-                    bindFilters(count, estadoPaciente, estadoAsignacion);
-                    try (ResultSet r = count.executeQuery()) { r.next(); total = r.getLong(1); }
-                }
-                List<PacienteAsignacionResumen> items = new ArrayList<>();
-                try (PreparedStatement rows = c.prepareStatement(rowsSql)) {
-                    bindFilters(rows, estadoPaciente, estadoAsignacion);
-                    rows.setInt(8, size);
-                    rows.setLong(9, offset);
-                    try (ResultSet r = rows.executeQuery()) {
-                        while (r.next()) {
-                            Paciente patient = new Paciente(r.getObject("id", UUID.class), r.getString("nombre_completo"), r.getString("documento"),
-                                null, null, null, null, r.getBoolean("activo"));
-                            UUID assignmentId = r.getObject("asignacion_id", UUID.class);
-                            AsignacionProfesionalPaciente last = null;
-                            if (assignmentId != null) {
-                                Date end = r.getDate("fecha_fin");
-                                last = new AsignacionProfesionalPaciente(assignmentId, patient.getId(),
-                                    r.getObject("profesional_id", UUID.class), r.getString("profesional_email"),
-                                    r.getDate("fecha_inicio").toLocalDate(), end == null ? null : end.toLocalDate());
-                            }
-                            items.add(new PacienteAsignacionResumen(patient, last));
+            long total;
+            try (PreparedStatement count = c.prepareStatement(countSql)) {
+                bindFilters(count, estadoPaciente, estadoAsignacion);
+                try (ResultSet r = count.executeQuery()) { r.next(); total = r.getLong(1); }
+            }
+            List<PacienteAsignacionResumen> items = new ArrayList<>();
+            try (PreparedStatement rows = c.prepareStatement(rowsSql)) {
+                bindFilters(rows, estadoPaciente, estadoAsignacion);
+                rows.setInt(8, size);
+                rows.setLong(9, offset);
+                try (ResultSet r = rows.executeQuery()) {
+                    while (r.next()) {
+                        Paciente patient = new Paciente(r.getObject("id", UUID.class), r.getString("nombre_completo"), r.getString("documento"),
+                            null, null, null, null, r.getBoolean("activo"));
+                        UUID assignmentId = r.getObject("asignacion_id", UUID.class);
+                        AsignacionProfesionalPaciente last = null;
+                        if (assignmentId != null) {
+                            Date end = r.getDate("fecha_fin");
+                            last = new AsignacionProfesionalPaciente(assignmentId, patient.getId(),
+                                r.getObject("profesional_id", UUID.class), r.getString("profesional_email"),
+                                r.getDate("fecha_inicio").toLocalDate(), end == null ? null : end.toLocalDate());
                         }
+                        items.add(new PacienteAsignacionResumen(patient, last));
                     }
                 }
-                c.commit();
-                return new PaginaPacientesAsignacion(items, page, size, total);
-            } catch (SQLException | RuntimeException failure) {
-                try { c.rollback(); } catch (SQLException rollback) { failure.addSuppressed(rollback); }
-                throw failure;
             }
+            return new PaginaPacientesAsignacion(items, page, size, total);
         } catch (SQLException e) { throw new PersistenceException("No se pudo consultar la lista administrativa de asignaciones.", e); }
     }
 

@@ -4,39 +4,10 @@ Aplicación web para que administradores y profesionales coordinen atención, pa
 
 ## Inicio rápido
 
-### Opción 1: Inicio Centralizado (Recomendado)
-
-Inicia automáticamente el Backend (Java 17 en el puerto 8080) y el Frontend (Vite en el puerto 5173) en una sola acción:
-
-- **Desde Windows Explorer**: haz doble clic en [`start.bat`](start.bat).
-- **Desde PowerShell**:
-  ```powershell
-  .\start.ps1
-  ```
-- **Verificar entorno y requisitos**:
-  ```powershell
-  .\start.ps1 -Check
-  ```
-- **Aplicar migraciones pendientes de PostgreSQL y arrancar**:
-  ```powershell
-  .\start.ps1 -Migrate
-  ```
-  *(O ejecuta de forma independiente `migrate.bat` / `.\migrate.ps1`)*
-
-El script se encarga de:
-1. Detectar automáticamente **JDK 17**, **Maven 3.9+**, **Node.js** y **npm** en el sistema.
-2. Cargar la configuración de PostgreSQL desde `.env.local` (o solicitarla de forma interactiva y segura si es la primera vez).
-3. Generar la clave secreta JWT aleatoria requerida para la sesión local.
-4. Instalar las dependencias de React si no se han instalado (`npm install`).
-5. Iniciar ambos servidores con supervisión en tiempo real y abrir el navegador en `http://localhost:5173`.
-6. Detener ambos servicios de forma limpia al presionar Enter o `q`.
-
-### Opción 2: Inicio Manual por Terminales Separadas
-
 Requisitos: JDK 17, Maven 3.9+, Node.js/npm y PostgreSQL.
 
 1. Configura PostgreSQL y las variables externas que describe [backend/README.md](backend/README.md). La URL JDBC indica el servidor y la base que usará la API.
-2. Aplica las migraciones Flyway V1–V6 con el comando de [backend/migrations/README.md](backend/migrations/README.md).
+2. Aplica las migraciones Flyway V1–V5 con el comando de [backend/migrations/README.md](backend/migrations/README.md).
 3. Inicializa o reconcilia la matriz aprobada de permisos siguiendo [backend/README.md](backend/README.md).
 4. En una terminal, desde la raíz: `mvn -f backend/pom.xml exec:java`.
 5. En otra terminal: `npm --prefix frontend install` y `npm --prefix frontend run dev`.

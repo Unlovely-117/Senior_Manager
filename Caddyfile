@@ -1,0 +1,5 @@
+{$SITE_ADDRESS::80} {
+    encode gzip zstd
+    reverse_proxy frontend:80
+}
+

@@ -25,5 +25,5 @@ La base PostgreSQL no se guarda en este repositorio. La URL JDBC externa define 
 
 ## Estado actual
 
-El backend usa Java 17, JDBC y Flyway; el frontend usa React, TypeScript y Vite. V1–V6 crean el esquema y la matriz de permisos se aplica por un comando operativo explícito. Las cuentas profesionales pueden completar su ficha y el administrador puede editar todos esos datos y decidir su verificación. El selector de tema se guarda localmente en el navegador.
+El backend usa Java 17, JDBC y Flyway; el frontend usa React, TypeScript y Vite. V1–V5 crean el esquema y la matriz de permisos se aplica por un comando operativo explícito. Las cuentas profesionales pueden completar su ficha y el administrador puede editar todos esos datos y decidir su verificación. El selector de tema se guarda localmente en el navegador.
 

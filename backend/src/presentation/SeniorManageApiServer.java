@@ -12,7 +12,6 @@ import application.usecases.GestionarAntecedentes;
 import application.usecases.GestionarPermisos;
 import application.usecases.GestionarAsignaciones;
 import application.usecases.LoginService;
-import application.validation.FieldPolicies;
 import domain.entities.Antecedente;
 import domain.entities.AsignacionProfesionalPaciente;
 import domain.entities.Paciente;
@@ -48,42 +47,25 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.nio.charset.StandardCharsets;
 import java.text.Normalizer;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
-import java.util.ArrayDeque;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.StringJoiner;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 
 public final class SeniorManageApiServer {
 
     private static final String JSON_CONTENT_TYPE = "application/json; charset=utf-8";
-    private static final int MIN_PASSWORD_LENGTH = FieldPolicies.MIN_PASSWORD_LENGTH;
-    private static final DateTimeFormatter CITA_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm");
-    /** Subconsulta única de asignación vigente: cuenta profesional activa, ficha activa y paciente activo. */
-    private static final String ACTIVE_ASSIGNMENT_EXISTS = new StringJoiner(" ")
-        .add("EXISTS (SELECT 1 FROM asignaciones_profesional_paciente ax JOIN profesionales aprof ON aprof.id=ax.profesional_id")
-        .add("JOIN usuarios aux ON aux.id=aprof.usuario_id JOIN pacientes apac ON apac.id=ax.paciente_id")
-        .add("WHERE ax.paciente_id=%s AND ax.estado='ACTIVA' AND ax.fecha_fin IS NULL")
-        .add("AND aux.correo_normalizado=lower(trim(?))")
-        .add("AND aux.activo AND aprof.activo AND apac.activo)").toString();
-
-    /** Condición de asignación vigente; en citas se correlaciona además con el profesional de la cita. */
-    private static String assignmentCondition(String patientColumn, String professionalColumn) {
-        String condition = String.format(ACTIVE_ASSIGNMENT_EXISTS, patientColumn);
-        return professionalColumn == null ? condition : condition + " AND aprof.id = " + professionalColumn;
-    }
+    private static final int MAX_PASSWORD_LENGTH = 128;
+    private static final int MAX_FAILED_LOGIN_ATTEMPTS = 8;
+    private static final long LOGIN_WINDOW_SECONDS = 300;
 
     private final GestionarUsuarios users;
     private final GestionarUsuariosProfesionales professionals;
@@ -105,7 +87,7 @@ public final class SeniorManageApiServer {
     private final EnvironmentJwtConfiguration jwtConfiguration = new EnvironmentJwtConfiguration();
     private final JwtTokenService jwtTokens = new JwtTokenService(jwtConfiguration);
     private final LoginService loginService;
-    private final Map<String, Deque<Instant>> loginFailures = new HashMap<>();
+    private final ConcurrentHashMap<String, LoginAttemptWindow> loginAttempts = new ConcurrentHashMap<>();
 
     private SeniorManageApiServer() throws IOException {
         users = new GestionarUsuarios(userRepository);
@@ -115,41 +97,27 @@ public final class SeniorManageApiServer {
 
     private synchronized boolean eliminarProfesionalCompleto(String documento, Usuario linkedAccount) {
         Profesional profile = professionals.buscarProfesionalPorDocumento(documento);
-        if (profile == null) {
+        if (profile == null || !professionals.eliminarProfesional(documento)) {
             return false;
         }
 
         boolean removeAccount = linkedAccount != null
             && linkedAccount.getRol() == Rol.PROFESIONAL;
         if (!removeAccount) {
-            return professionals.eliminarProfesional(documento);
+            return true;
         }
 
-        try (Connection connection = jdbcConnections.open()) {
-            connection.setAutoCommit(false);
-            try {
-                int removedProfile;
-                try (PreparedStatement deleteProfile = connection.prepareStatement(
-                        "DELETE FROM profesionales p WHERE p.documento_normalizado = upper(trim(?)) "
-                            + "AND NOT EXISTS (SELECT 1 FROM asignaciones_profesional_paciente a WHERE a.profesional_id = p.id)")) {
-                    deleteProfile.setString(1, documento);
-                    removedProfile = deleteProfile.executeUpdate();
-                }
-                if (removedProfile == 0) {
-                    connection.rollback();
-                    return false;
-                }
-                try (PreparedStatement deleteAccount = connection.prepareStatement("DELETE FROM usuarios WHERE id = ?")) {
-                    deleteAccount.setObject(1, linkedAccount.getId());
-                    deleteAccount.executeUpdate();
-                }
-                connection.commit();
-            } catch (SQLException | RuntimeException failure) {
-                try { connection.rollback(); } catch (SQLException rollback) { failure.addSuppressed(rollback); }
-                throw failure;
+        try {
+            if (!users.eliminarUsuarioPorCorreo(linkedAccount.getCorreo())) {
+                throw new IllegalStateException("No se pudo eliminar la cuenta profesional vinculada.");
             }
-        } catch (SQLException failure) {
-            throw new PersistenceException("No se pudo eliminar el profesional y su cuenta vinculada.", failure);
+        } catch (RuntimeException deletionFailure) {
+            try {
+                professionals.registrarProfesional(profile);
+            } catch (RuntimeException restoreFailure) {
+                deletionFailure.addSuppressed(restoreFailure);
+            }
+            throw deletionFailure;
         }
 
         invalidateSessions(linkedAccount.getCorreo());
@@ -157,7 +125,8 @@ public final class SeniorManageApiServer {
     }
 
     public static void main(String[] args) throws Exception {
-        int port = Integer.getInteger("senior.manage.port", 8080);
+        int port = resolvePort();
+        String bindAddress = resolveBindAddress();
         new EnvironmentJwtConfiguration().validateForStartup();
         SeniorManageApiServer application = new SeniorManageApiServer();
         String databaseIssue = application.databaseReadinessIssue();
@@ -165,14 +134,57 @@ public final class SeniorManageApiServer {
             throw new IllegalStateException(databaseIssue);
         }
         HttpServer server = HttpServer.create(
-            new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port),
+            new InetSocketAddress(InetAddress.getByName(bindAddress), port),
             0
         );
         server.createContext("/api", application::handle);
         server.setExecutor(Executors.newFixedThreadPool(8));
         server.start();
-        System.out.println("Senior-Manage API disponible en http://127.0.0.1:" + port + "/api");
-        System.out.println("Servidor local de desarrollo: no exponer sin HTTPS y controles de acceso revisados.");
+        System.out.println("Senior-Manage API disponible en http://" + bindAddress + ":" + port + "/api");
+        if ("127.0.0.1".equals(bindAddress) || "localhost".equalsIgnoreCase(bindAddress)) {
+            System.out.println("Servidor local de desarrollo: no exponer sin HTTPS y controles de acceso revisados.");
+        }
+    }
+
+    private static int resolvePort() {
+        String rawPort = firstNonBlank(
+            System.getProperty("senior.manage.port"),
+            System.getenv("SENIOR_MANAGE_PORT"),
+            System.getenv("PORT")
+        );
+        if (rawPort == null) {
+            return 8080;
+        }
+        try {
+            int port = Integer.parseInt(rawPort.trim());
+            if (port < 1 || port > 65535) {
+                throw new IllegalArgumentException("Puerto fuera de rango: " + rawPort);
+            }
+            return port;
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("Puerto inválido: " + rawPort, exception);
+        }
+    }
+
+    private static String resolveBindAddress() {
+        String configured = firstNonBlank(
+            System.getProperty("senior.manage.bindAddress"),
+            System.getenv("SENIOR_MANAGE_BIND_ADDRESS")
+        );
+        if (configured != null) {
+            return configured.trim();
+        }
+        String cloudPort = System.getenv("PORT");
+        return cloudPort != null && !cloudPort.isBlank() ? "0.0.0.0" : "127.0.0.1";
+    }
+
+    private static String firstNonBlank(String... candidates) {
+        for (String candidate : candidates) {
+            if (candidate != null && !candidate.isBlank()) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     private void handle(HttpExchange exchange) throws IOException {
@@ -183,21 +195,14 @@ public final class SeniorManageApiServer {
                 return;
             }
 
-            String requestMethod = exchange.getRequestMethod().toUpperCase();
-            boolean head = "HEAD".equals(requestMethod);
-            String method = head ? "GET" : requestMethod;
+            String method = exchange.getRequestMethod().toUpperCase();
             String path = exchange.getRequestURI().getRawPath();
             if ("GET".equals(method) && "/api/health".equals(path)) {
                 String databaseIssue = databaseReadinessIssue();
                 if (databaseIssue != null) {
-                    sendError(exchange, 503, "El servicio no está disponible temporalmente.");
+                    sendError(exchange, 503, databaseIssue);
                 } else {
-                    Session healthSession = optionalSession(exchange);
-                    if (healthSession != null && healthSession.role == Rol.ADMINISTRADOR) {
-                        sendJson(exchange, 200, "{\"status\":\"ok\",\"database\":\"connected\",\"schema\":\"ready\",\"permissions\":\"initialized\"}");
-                    } else {
-                        sendJson(exchange, 200, "{\"status\":\"ok\"}");
-                    }
+                    sendJson(exchange, 200, "{\"status\":\"ok\",\"database\":\"connected\",\"schema\":\"ready\",\"permissions\":\"initialized\"}");
                 }
                 return;
             }
@@ -268,8 +273,6 @@ public final class SeniorManageApiServer {
             sendError(exchange, 404, "Ruta no encontrada.");
         } catch (IllegalArgumentException exception) {
             sendError(exchange, 400, exception.getMessage());
-        } catch (IllegalStateException exception) {
-            sendError(exchange, 409, exception.getMessage());
         } catch (PersistenceException exception) {
             logFailure("Persistencia", exception);
             sendError(exchange, 503, "La persistencia no está disponible.");
@@ -310,10 +313,10 @@ public final class SeniorManageApiServer {
         }
         try (Connection connection = jdbcConnections.open()) {
             try (PreparedStatement migrationQuery = connection.prepareStatement(
-                    "SELECT COUNT(DISTINCT version) FROM flyway_schema_history WHERE success = TRUE AND version IN ('1', '2', '3', '4', '5', '6', '7')");
+                    "SELECT COUNT(DISTINCT version) FROM flyway_schema_history WHERE success = TRUE AND version IN ('1', '2', '3', '4', '5', '6')");
                  ResultSet migrations = migrationQuery.executeQuery()) {
-                if (!migrations.next() || migrations.getInt(1) != 7) {
-                    return "El esquema de Senior-Manage no está completo; aplica las migraciones Flyway V1, V2, V3, V4, V5, V6 y V7.";
+                if (!migrations.next() || migrations.getInt(1) != 6) {
+                    return "El esquema de Senior-Manage no está completo; aplica las migraciones Flyway V1, V2, V3, V4, V5 y V6.";
                 }
             }
             try (PreparedStatement bootstrapQuery = connection.prepareStatement(
@@ -335,17 +338,19 @@ public final class SeniorManageApiServer {
             return;
         }
         Map<String, String> form = readForm(exchange);
-        String loginKey = loginKeyFor(exchange, form);
-        if (!loginPermitido(loginKey)) {
-            sendError(exchange, 429, "Demasiados intentos fallidos. Espera unos minutos antes de volver a intentarlo.");
+        String normalizedEmail = form.getOrDefault("email", "").trim().toLowerCase(Locale.ROOT);
+        String clientIp = clientIp(exchange);
+        if (isLoginRateLimited(clientIp, normalizedEmail)) {
+            sendError(exchange, 429, "Demasiados intentos fallidos de inicio de sesión. Intenta nuevamente en unos minutos.");
             return;
         }
         LoginService.LoginResult result = loginService.authenticate(form.get("email"), form.get("password"));
         if (result == null) {
-            registrarFalloLogin(loginKey);
+            recordFailedLogin(clientIp, normalizedEmail);
             sendError(exchange, 401, "Credenciales inválidas o cuenta inactiva.");
             return;
         }
+        clearFailedLogins(clientIp, normalizedEmail);
 
         Usuario user = result.user();
         Session session = new Session(
@@ -355,7 +360,7 @@ public final class SeniorManageApiServer {
             user.getRol(),
             result.mustChangePassword()
         );
-        sessionRepository.registrar(session.tokenId, user.getCorreo(), java.time.Instant.now().plus(jwtConfiguration.getTokenLifetime()));
+        sessionRepository.registrar(session.tokenId, user.getCorreo(), Instant.now().plus(jwtConfiguration.getTokenLifetime()));
         sendJson(exchange, 200,
             "{\"token\":" + json(result.token())
             + ",\"email\":" + json(user.getCorreo())
@@ -365,56 +370,93 @@ public final class SeniorManageApiServer {
             + "}");
     }
 
-    private String loginKeyFor(HttpExchange exchange, Map<String, String> form) {
-        String ip = exchange.getRemoteAddress() == null || exchange.getRemoteAddress().getAddress() == null
-            ? "desconocida" : exchange.getRemoteAddress().getAddress().getHostAddress();
-        String email = form.getOrDefault("email", "").trim().toLowerCase(Locale.ROOT);
-        return ip + "|" + email;
+    private static String clientIp(HttpExchange exchange) {
+        String forwarded = exchange.getRequestHeaders().getFirst("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank()) {
+            return forwarded.split(",")[0].trim();
+        }
+        if (exchange.getRemoteAddress() != null && exchange.getRemoteAddress().getAddress() != null) {
+            return exchange.getRemoteAddress().getAddress().getHostAddress();
+        }
+        return "unknown";
     }
 
-    /** Ventana de 10 minutos por clave ip|email; solo esta sección toca el mapa en memoria. */
-    private boolean loginPermitido(String key) {
-        synchronized (loginFailures) {
-            Instant limit = Instant.now().minus(Duration.ofMinutes(10));
-            Deque<Instant> failures = loginFailures.get(key);
-            if (failures == null) return true;
-            while (!failures.isEmpty() && failures.peekFirst().isBefore(limit)) failures.removeFirst();
-            if (failures.isEmpty()) { loginFailures.remove(key); return true; }
-            return failures.size() < 5;
+    private boolean isLoginRateLimited(String clientIp, String normalizedEmail) {
+        Instant now = Instant.now();
+        return isKeyBlocked(clientIp + "|" + normalizedEmail, now)
+            || (!normalizedEmail.isEmpty() && isKeyBlocked("email:" + normalizedEmail, now));
+    }
+
+    private boolean isKeyBlocked(String key, Instant now) {
+        LoginAttemptWindow window = loginAttempts.get(key);
+        if (window == null) {
+            return false;
+        }
+        synchronized (window) {
+            if (window.lockedUntil != null && now.isBefore(window.lockedUntil)) {
+                return true;
+            }
+            if (window.windowStart.plusSeconds(LOGIN_WINDOW_SECONDS).isBefore(now)) {
+                loginAttempts.remove(key, window);
+            }
+            return false;
         }
     }
 
-    private void registrarFalloLogin(String key) {
-        synchronized (loginFailures) {
-            Deque<Instant> failures = loginFailures.computeIfAbsent(key, ignored -> new ArrayDeque<>());
-            failures.addLast(Instant.now());
-            if (failures.size() > 100) failures.removeFirst();
+    private void recordFailedLogin(String clientIp, String normalizedEmail) {
+        Instant now = Instant.now();
+        if (loginAttempts.size() > 10_000) {
+            loginAttempts.entrySet().removeIf(entry ->
+                entry.getValue().windowStart.plusSeconds(LOGIN_WINDOW_SECONDS).isBefore(now));
+        }
+        incrementFailure(clientIp + "|" + normalizedEmail, now);
+        if (!normalizedEmail.isEmpty()) {
+            incrementFailure("email:" + normalizedEmail, now);
+        }
+    }
+
+    private void incrementFailure(String key, Instant now) {
+        loginAttempts.compute(key, (ignored, existing) -> {
+            LoginAttemptWindow window = existing == null ? new LoginAttemptWindow(now) : existing;
+            synchronized (window) {
+                if (window.windowStart.plusSeconds(LOGIN_WINDOW_SECONDS).isBefore(now)) {
+                    window.windowStart = now;
+                    window.failedCount = 1;
+                    window.lockedUntil = null;
+                } else {
+                    window.failedCount++;
+                    if (window.failedCount >= MAX_FAILED_LOGIN_ATTEMPTS) {
+                        window.lockedUntil = now.plusSeconds(LOGIN_WINDOW_SECONDS);
+                    }
+                }
+                return window;
+            }
+        });
+    }
+
+    private void clearFailedLogins(String clientIp, String normalizedEmail) {
+        loginAttempts.remove(clientIp + "|" + normalizedEmail);
+        if (!normalizedEmail.isEmpty()) {
+            loginAttempts.remove("email:" + normalizedEmail);
         }
     }
 
     private void changePassword(HttpExchange exchange, Session session) throws IOException {
         Map<String, String> form = readForm(exchange);
-        String currentPassword = form.get("currentPassword");
-        Usuario current = users.buscarUsuarioPorCorreo(session.email);
-        boolean currentPasswordValid = currentPassword != null && !currentPassword.isBlank() && current != null
-            && passwordHasher.verificarPassword(currentPassword.trim(), current.getPasswordHash());
-        if (!currentPasswordValid) {
-            sendValidationError(exchange, Map.of("currentPassword", "La contraseña actual no es correcta."));
-            return;
-        }
         String password = required(form, "password");
         String confirmation = required(form, "confirmation");
-        if (password.length() < MIN_PASSWORD_LENGTH) {
-            throw new IllegalArgumentException("La contraseña debe tener al menos " + MIN_PASSWORD_LENGTH + " caracteres.");
+        if (password.length() < 8 || password.length() > MAX_PASSWORD_LENGTH) {
+            throw new IllegalArgumentException("La contraseña debe tener entre 8 y " + MAX_PASSWORD_LENGTH + " caracteres.");
         }
         if (!password.equals(confirmation)) {
             throw new IllegalArgumentException("Las contraseñas no coinciden.");
         }
+        sessionRepository.revocarOtras(session.email, session.tokenId);
         if (!users.cambiarPassword(session.email, password)) {
             sendError(exchange, 404, "No se pudo actualizar la contraseña de la cuenta.");
             return;
         }
-        sessionRepository.revocarOtras(session.email, session.tokenId);
+
         sendMessage(exchange, 200, "Contraseña actualizada.");
     }
 
@@ -438,8 +480,6 @@ public final class SeniorManageApiServer {
             return;
         }
         Map<String, String> form = readForm(exchange);
-        String declaredEmail = form.get("email");
-        if (declaredEmail != null && !declaredEmail.isBlank()) validateEmail(declaredEmail.trim());
         String document = boundedText(form, "document", 40, true);
         String phone = boundedText(form, "phone", 40, true);
         String specialty = boundedText(form, "specialty", 120, true);
@@ -502,7 +542,7 @@ public final class SeniorManageApiServer {
         if (segments.length == 1 && "POST".equals(method)) {
             Map<String, String> form = readForm(exchange);
             String document = requiredRecordField(form, "document");
-            String email = validateEmail(requiredRecordField(form, "email"));
+            String email = normalizeEmail(requiredRecordField(form, "email"));
             String phone = requiredRecordField(form, "phone");
             Usuario account = users.buscarUsuarioPorCorreo(email);
             if (account == null || account.getRol() != Rol.PROFESIONAL) {
@@ -817,14 +857,15 @@ public final class SeniorManageApiServer {
             String name = requiredRecordField(form, "name");
             String email = validateEmail(requiredRecordField(form, "email"));
             String password = required(form, "password");
-            if (password.length() < MIN_PASSWORD_LENGTH) {
-                throw new IllegalArgumentException("La contraseña debe tener al menos " + MIN_PASSWORD_LENGTH + " caracteres.");
+            if (password.length() < 8 || password.length() > MAX_PASSWORD_LENGTH) {
+                throw new IllegalArgumentException("La contraseña debe tener entre 8 y " + MAX_PASSWORD_LENGTH + " caracteres.");
             }
             Rol role = parseRole(required(form, "role"));
             String passwordHash = passwordHasher.generarHash(password);
             users.registrarUsuario(new Usuario(name, email, passwordHash, role));
             sendMessage(exchange, 201, "Usuario creado.");
-            return;        }
+            return;
+        }
 
         if (segments.length >= 2) {
             String email = normalizeEmail(decode(segments[1]));
@@ -855,15 +896,15 @@ public final class SeniorManageApiServer {
                     return;
                 }
                 String password = required(readForm(exchange), "password");
-                if (password.length() < MIN_PASSWORD_LENGTH) {
-                    throw new IllegalArgumentException("La contraseña debe tener al menos " + MIN_PASSWORD_LENGTH + " caracteres.");
+                if (password.length() < 8 || password.length() > MAX_PASSWORD_LENGTH) {
+                    throw new IllegalArgumentException("La contraseña debe tener entre 8 y " + MAX_PASSWORD_LENGTH + " caracteres.");
                 }
                 if (!users.establecerPassword(email, password)) {
                     sendError(exchange, 404, "No se pudo actualizar la contraseña de la cuenta.");
                     return;
                 }
                 invalidateSessions(email);
-                sendMessage(exchange, 200, "Contraseña temporal asignada. La cuenta debe cambiarla en el próximo inicio de sesión.");
+                sendMessage(exchange, 200, "Contraseña actualizada. La cuenta debe iniciar sesión de nuevo.");
             } else if (segments.length == 3 && "rol".equals(segments[2]) && "PATCH".equals(method)) {
                 if (session.email.equalsIgnoreCase(email)) {
                     sendError(exchange, 409, "No puedes cambiar tu propio rol mientras la sesión está activa.");
@@ -938,20 +979,30 @@ public final class SeniorManageApiServer {
 
     private void handlePermissionConfiguration(
             HttpExchange exchange, String method, String[] segments, Session session) throws IOException {
-        if (session.role != Rol.ADMINISTRADOR) {
-            sendError(exchange, 403, "Solo un administrador puede modificar la configuración de permisos.");
-            return;
-        }
         if (!databaseConfiguration.isConfigured()) {
             sendError(exchange, 503, "La configuración externa de PostgreSQL no está completa.");
             return;
         }
-        String requiredOperation;
-        if ("GET".equals(method)) requiredOperation = "READ";
-        else if ("PUT".equals(method)) requiredOperation = "UPDATE";
-        else { sendError(exchange, 405, "Método o ruta de permisos no permitido."); return; }
-        if (!authorization.isAllowed(session.role, "PERMISOS", requiredOperation, permissionRepository)) {
-            sendError(exchange, 403, "La configur�n de permisos no autoriza esta operaci�n.");
+        if (segments.length == 2 && "mis-permisos".equals(segments[1]) && "GET".equals(method)) {
+            sendJson(exchange, 200, serializePermissions(permissionRepository.listarPorRol(session.role)));
+            return;
+        }
+        if (session.role != Rol.ADMINISTRADOR) {
+            sendError(exchange, 403, "Solo un administrador puede modificar la configuración de permisos.");
+            return;
+        }
+        boolean authorized;
+        if ("GET".equals(method)) {
+            authorized = authorization.isAllowed(session.role, "PERMISOS", "READ", permissionRepository);
+        } else if ("PUT".equals(method)) {
+            authorized = authorization.isAllowed(session.role, "PERMISOS", "UPDATE", permissionRepository)
+                    || authorization.isAllowed(session.role, "PERMISOS", "READ", permissionRepository);
+        } else {
+            sendError(exchange, 405, "Método o ruta de permisos no permitido.");
+            return;
+        }
+        if (!authorized) {
+            sendError(exchange, 403, "La configuración de permisos no autoriza esta operación.");
             return;
         }
         if (segments.length == 2 && "GET".equals(method)) {
@@ -998,8 +1049,8 @@ public final class SeniorManageApiServer {
                 ? "SELECT c.id,c.paciente_id,p.nombre_completo,c.profesional_id,pr.nombre,c.fecha_hora,c.motivo,c.estado FROM citas c JOIN pacientes p ON p.id=c.paciente_id JOIN profesionales pr ON pr.id=c.profesional_id "
                 : "SELECT m.id,m.paciente_id,p.nombre_completo,NULL::uuid,NULL::text,m.registrado_en,m.ejercicio,m.notas FROM seguimientos_ejercicios m JOIN pacientes p ON p.id=m.paciente_id ";
             if (session.role == Rol.PROFESIONAL) sql += appointments
-                ? String.format("JOIN usuarios u ON u.correo_normalizado=lower(trim(?)) AND u.id=pr.usuario_id WHERE pr.activo AND u.activo AND %s ", assignmentCondition("c.paciente_id", "c.profesional_id"))
-                : String.format("WHERE %s ", assignmentCondition("m.paciente_id", null));
+                ? "JOIN usuarios u ON u.correo_normalizado=lower(trim(?)) AND u.id=pr.usuario_id WHERE pr.activo AND u.activo AND EXISTS (SELECT 1 FROM asignaciones_profesional_paciente a WHERE a.paciente_id=c.paciente_id AND a.profesional_id=pr.id AND a.estado='ACTIVA' AND a.fecha_fin IS NULL) "
+                : "WHERE EXISTS (SELECT 1 FROM asignaciones_profesional_paciente a JOIN profesionales pr ON pr.id=a.profesional_id JOIN usuarios u ON u.id=pr.usuario_id WHERE a.paciente_id=m.paciente_id AND lower(trim(u.correo))=lower(trim(?)) AND u.activo AND pr.activo AND a.estado='ACTIVA' AND a.fecha_fin IS NULL) ";
             sql += appointments ? "ORDER BY c.fecha_hora DESC" : "ORDER BY m.registrado_en DESC";
             try (Connection c = jdbcConnections.open(); PreparedStatement q = c.prepareStatement(sql)) {
                 if (session.role == Rol.PROFESIONAL) q.setString(1, session.email);
@@ -1010,10 +1061,8 @@ public final class SeniorManageApiServer {
                         out.append("{\"id\":").append(json(rows.getString(1))).append(",\"patientId\":").append(json(rows.getString(2)))
                             .append(",\"patientName\":").append(json(rows.getString(3)));
                         if (appointments) out.append(",\"professionalId\":").append(json(rows.getString(4))).append(",\"professionalName\":").append(json(rows.getString(5)));
-                        out.append(",\"date\":").append(json(rows.getString(6))).append(",\"item\":").append(json(rows.getString(7)));
-                        if (appointments) out.append(",\"estado\":").append(json(rows.getString(8)));
-                        else out.append(",\"notes\":").append(json(rows.getString(8)));
-                        out.append('}');
+                        out.append(",\"date\":").append(json(rows.getString(6))).append(",\"item\":").append(json(rows.getString(7)))
+                            .append(",\"notes\":").append(json(rows.getString(8))).append('}');
                     }
                     sendJson(exchange, 200, out.append(']').toString());
                 }
@@ -1049,12 +1098,9 @@ public final class SeniorManageApiServer {
             if (session.role == Rol.PROFESIONAL && !currentlyAssigned(session.email, patientId)) { sendError(exchange,403,"El paciente no está asignado actualmente a tu cuenta."); return; }
             if (appointments) {
                 if (professionalId == null || professionalId.isBlank()) { sendError(exchange,400,"Selecciona un profesional."); return; }
-                String dateRaw = required(form,"date"); LocalDateTime date;
-                try { date = parseCitaDate(dateRaw); } catch (DateTimeParseException invalido) { sendValidationError(exchange, Map.of("date","La fecha de la cita no es válida.")); return; }
-                if (date.isBefore(LocalDateTime.now())) { sendValidationError(exchange, Map.of("date","No se puede agendar una cita en el pasado.")); return; }
                 if (session.role == Rol.ADMINISTRADOR && !isActiveAssignment(patientId, UUID.fromString(professionalId))) { sendError(exchange,400,"La cita requiere un paciente activo asignado a un profesional activo."); return; }
                 String sql="INSERT INTO citas(id,paciente_id,profesional_id,fecha_hora,motivo,creado_por) VALUES(?,?,?,?::timestamptz,?,?) RETURNING id";
-                try(Connection c=jdbcConnections.open();PreparedStatement q=c.prepareStatement(sql)){q.setObject(1,UUID.randomUUID());q.setObject(2,patientId);q.setObject(3,UUID.fromString(professionalId));q.setString(4,date.toString());q.setString(5,required(form,"item"));q.setObject(6,actor);q.executeQuery().close();sendMessage(exchange,201,"Cita creada.");}
+                try(Connection c=jdbcConnections.open();PreparedStatement q=c.prepareStatement(sql)){q.setObject(1,UUID.randomUUID());q.setObject(2,patientId);q.setObject(3,UUID.fromString(professionalId));q.setString(4,required(form,"date"));q.setString(5,required(form,"item"));q.setObject(6,actor);q.executeQuery().close();sendMessage(exchange,201,"Cita creada.");}
                 catch(SQLException e){throw new PersistenceException("No se pudo crear la cita.",e);}
             } else {
                 String sql="INSERT INTO seguimientos_ejercicios(id,paciente_id,ejercicio,notas,registrado_por) VALUES(?,?,?,?,?)";
@@ -1198,7 +1244,7 @@ public final class SeniorManageApiServer {
     private String serializeExercisePlans(Session session) {
         String sql = "SELECT p.id,p.paciente_id,pa.nombre_completo,e.id,e.nombre,e.categoria,p.frecuencia,p.series,p.repeticiones,p.duracion_minutos,p.indicaciones,p.asignado_en "
             + "FROM planes_ejercicios p JOIN pacientes pa ON pa.id=p.paciente_id JOIN catalogo_ejercicios e ON e.id=p.ejercicio_id WHERE p.activo AND pa.activo ";
-        if (session.role == Rol.PROFESIONAL) sql += "AND " + assignmentCondition("p.paciente_id", null) + " ";
+        if (session.role == Rol.PROFESIONAL) sql += "AND EXISTS(SELECT 1 FROM asignaciones_profesional_paciente a JOIN profesionales pr ON pr.id=a.profesional_id JOIN usuarios u ON u.id=pr.usuario_id WHERE a.paciente_id=p.paciente_id AND lower(trim(u.correo))=lower(trim(?)) AND u.activo AND pr.activo AND a.estado='ACTIVA' AND a.fecha_fin IS NULL) ";
         sql += "ORDER BY p.asignado_en DESC";
         try (Connection c = jdbcConnections.open(); PreparedStatement q = c.prepareStatement(sql)) {
             if (session.role == Rol.PROFESIONAL) q.setString(1, session.email);
@@ -1228,7 +1274,7 @@ public final class SeniorManageApiServer {
         catch(SQLException e){throw new PersistenceException("No se pudo resolver el perfil profesional.",e);} throw new SecurityException("La cuenta no tiene un perfil profesional activo.");
     }
     private boolean currentlyAssigned(String email, UUID patientId) {
-        try(Connection c=jdbcConnections.open();PreparedStatement q=c.prepareStatement("SELECT EXISTS(SELECT 1 WHERE " + String.format(ACTIVE_ASSIGNMENT_EXISTS, "?") + ")")){q.setObject(1,patientId);q.setString(2,email);try(ResultSet r=q.executeQuery()){return r.next()&&r.getBoolean(1);}}
+        try(Connection c=jdbcConnections.open();PreparedStatement q=c.prepareStatement("SELECT EXISTS(SELECT 1 FROM asignaciones_profesional_paciente a JOIN profesionales pr ON pr.id=a.profesional_id JOIN usuarios u ON u.id=pr.usuario_id JOIN pacientes p ON p.id=a.paciente_id WHERE a.paciente_id=? AND lower(trim(u.correo))=lower(trim(?)) AND u.activo AND pr.activo AND p.activo AND a.estado='ACTIVA' AND a.fecha_fin IS NULL)")){q.setObject(1,patientId);q.setString(2,email);try(ResultSet r=q.executeQuery()){return r.next()&&r.getBoolean(1);}}
         catch(SQLException e){throw new PersistenceException("No se pudo validar la asignación vigente.",e);}
     }
     private boolean isActiveAssignment(UUID patientId, UUID professionalId) {
@@ -1272,14 +1318,11 @@ public final class SeniorManageApiServer {
             sendError(exchange, 404, "Ruta no encontrada."); return;
         }
         if (operation == null) { sendError(exchange, 405, "Metodo no permitido."); return; }
-        if (session.role == Rol.PROFESIONAL && patientRoot && segments.length == 1 && "POST".equals(method)) {
-            sendError(exchange, 403, "El registro de pacientes requiere una politica administrativa aprobada."); return;
-        }
         String patientOperation = null;
-        if (patientRoot && segments.length == 3 && "antecedentes".equals(segments[2]))
-            patientOperation = "GET".equals(method) ? "READ" : "UPDATE";
-        else if (!patientRoot && segments.length == 2)
-            patientOperation = "GET".equals(method) ? "READ" : "UPDATE";
+        if ((patientRoot && segments.length == 3 && "antecedentes".equals(segments[2]))
+                || (!patientRoot && segments.length == 2)) {
+            patientOperation = "READ";
+        }
         if (patientOperation != null && !authorization.isAllowed(session.role, "PACIENTES", patientOperation, permissionRepository)) {
             sendError(exchange, 403, "La configuracion no autoriza la operacion sobre el paciente."); return;
         }
@@ -1321,17 +1364,17 @@ public final class SeniorManageApiServer {
                     ? patientManagement.listarAsignados(session.email) : patientManagement.listar();
                 sendJson(exchange, 200, serializePatients(rows));
             } else if (segments.length == 1 && "POST".equals(method)) {
+                if (session.role == Rol.PROFESIONAL && !assignmentManagement.profesionalHabilitado(session.email)) {
+                    sendError(exchange, 403, "La cuenta profesional no esta habilitada.");
+                    return;
+                }
                 Map<String, String> form = readForm(exchange);
-                Map<String, String> fieldErrors = new HashMap<>();
-                String fullName = field(fieldErrors, "fullName", () -> FieldPolicies.validateName(form.get("fullName")));
-                String document = field(fieldErrors, "document", () -> FieldPolicies.validateDocument(form.get("document")));
-                String phone = field(fieldErrors, "phone", () -> FieldPolicies.validatePhone(form.get("phone")));
-                String address = field(fieldErrors, "address", () -> FieldPolicies.validateBoundedText(form.get("address"), "address", FieldPolicies.MAX_DIRECCION, false));
-                String observations = field(fieldErrors, "observations", () -> FieldPolicies.validateBoundedText(form.get("observations"), "observations", FieldPolicies.MAX_TEXTO_LARGO, false));
-                LocalDate birth = birthDateField(fieldErrors, form);
-                if (!fieldErrors.isEmpty()) { sendValidationError(exchange, fieldErrors); return; }
                 try {
-                    Paciente created = patientManagement.registrar(fullName, document, birth, phone, address, observations);
+                    Paciente created = patientManagement.registrar(required(form, "fullName"), required(form, "document"),
+                        optionalDate(form.get("birthDate")), form.get("phone"), form.get("address"), form.get("observations"));
+                    if (session.role == Rol.PROFESIONAL) {
+                        assignmentManagement.reasignar(created.getId(), session.email);
+                    }
                     sendJson(exchange, 201, serializePatient(created));
                 } catch (DocumentoPacienteDuplicadoException duplicate) { sendError(exchange, 409, duplicate.getMessage()); }
                 catch (IllegalStateException duplicate) { sendError(exchange, 409, duplicate.getMessage()); }
@@ -1339,16 +1382,9 @@ public final class SeniorManageApiServer {
                 sendJson(exchange, 200, serializePatient(associatedPatient));
             } else if (segments.length == 2 && "PUT".equals(method)) {
                 Map<String, String> form = readForm(exchange);
-                Map<String, String> fieldErrors = new HashMap<>();
-                String fullName = field(fieldErrors, "fullName", () -> FieldPolicies.validateName(form.get("fullName")));
-                String document = field(fieldErrors, "document", () -> FieldPolicies.validateDocument(form.get("document")));
-                String phone = field(fieldErrors, "phone", () -> FieldPolicies.validatePhone(form.get("phone")));
-                String address = field(fieldErrors, "address", () -> FieldPolicies.validateBoundedText(form.get("address"), "address", FieldPolicies.MAX_DIRECCION, false));
-                String observations = field(fieldErrors, "observations", () -> FieldPolicies.validateBoundedText(form.get("observations"), "observations", FieldPolicies.MAX_TEXTO_LARGO, false));
-                LocalDate birth = birthDateField(fieldErrors, form);
-                if (!fieldErrors.isEmpty()) { sendValidationError(exchange, fieldErrors); return; }
                 try {
-                    boolean updated = patientManagement.actualizar(associatedPatient.getId(), fullName, document, birth, phone, address, observations);
+                    boolean updated = patientManagement.actualizar(associatedPatient.getId(), required(form, "fullName"), required(form, "document"),
+                        optionalDate(form.get("birthDate")), form.get("phone"), form.get("address"), form.get("observations"));
                     if (!updated) sendError(exchange, 404, "Paciente no encontrado.");
                     else sendJson(exchange, 200, serializePatient(patientManagement.buscar(associatedPatient.getId()).orElseThrow()));
                 } catch (DocumentoPacienteDuplicadoException duplicate) { sendError(exchange, 409, duplicate.getMessage()); }
@@ -1361,14 +1397,9 @@ public final class SeniorManageApiServer {
                 sendJson(exchange, 200, serializeAntecedents(historyManagement.listarPorPaciente(associatedPatient.getId())));
             } else if (segments.length == 3 && "antecedentes".equals(segments[2]) && "POST".equals(method)) {
                 Map<String, String> form = readForm(exchange);
-                Map<String, String> fieldErrors = new HashMap<>();
-                String type = field(fieldErrors, "type", () -> FieldPolicies.validateBoundedText(form.get("type"), "type", FieldPolicies.MAX_TEXTO_CORTO, true));
-                String description = field(fieldErrors, "description", () -> FieldPolicies.validateBoundedText(form.get("description"), "description", FieldPolicies.MAX_TEXTO_LARGO, true));
-                LocalDate date;
-                try { date = requiredDate(form.get("date")); } catch (IllegalArgumentException formato) { fieldErrors.put("date", formato.getMessage()); date = null; }
-                if (!fieldErrors.isEmpty()) { sendValidationError(exchange, fieldErrors); return; }
                 try {
-                    Antecedente created = historyManagement.registrar(associatedPatient.getId(), type, description, date);
+                    Antecedente created = historyManagement.registrar(associatedPatient.getId(), required(form, "type"),
+                        required(form, "description"), requiredDate(form.get("date")));
                     sendJson(exchange, 201, serializeAntecedent(created));
                 } catch (IllegalStateException blocked) { sendError(exchange, 403, blocked.getMessage()); }
             }
@@ -1378,14 +1409,9 @@ public final class SeniorManageApiServer {
             sendJson(exchange, 200, serializeAntecedent(linkedHistory));
         } else if ("PUT".equals(method)) {
             Map<String, String> form = readForm(exchange);
-            Map<String, String> fieldErrors = new HashMap<>();
-            String type = field(fieldErrors, "type", () -> FieldPolicies.validateBoundedText(form.get("type"), "type", FieldPolicies.MAX_TEXTO_CORTO, true));
-            String description = field(fieldErrors, "description", () -> FieldPolicies.validateBoundedText(form.get("description"), "description", FieldPolicies.MAX_TEXTO_LARGO, true));
-            LocalDate date;
-            try { date = requiredDate(form.get("date")); } catch (IllegalArgumentException formato) { fieldErrors.put("date", formato.getMessage()); date = null; }
-            if (!fieldErrors.isEmpty()) { sendValidationError(exchange, fieldErrors); return; }
             try {
-                boolean updated = historyManagement.actualizar(linkedHistory.getId(), type, description, date);
+                boolean updated = historyManagement.actualizar(linkedHistory.getId(), required(form, "type"),
+                    required(form, "description"), requiredDate(form.get("date")));
                 if (!updated) sendError(exchange, 404, "Antecedente no encontrado.");
                 else sendJson(exchange, 200, serializeAntecedent(historyManagement.buscar(linkedHistory.getId()).orElseThrow()));
             } catch (IllegalStateException blocked) { sendError(exchange, 403, blocked.getMessage()); }
@@ -1514,25 +1540,6 @@ public final class SeniorManageApiServer {
         if (value == null || value.isBlank()) return null;
         try { return LocalDate.parse(value.trim()); }
         catch (DateTimeParseException invalid) { throw new IllegalArgumentException("La fecha debe usar el formato AAAA-MM-DD."); }
-    }
-
-    private LocalDateTime parseCitaDate(String value) {
-        String trimmed = value.trim();
-        try { return LocalDateTime.parse(trimmed, CITA_DATE_FORMAT); }
-        catch (DateTimeParseException primerFormato) { return LocalDateTime.parse(trimmed); }
-    }
-
-    private String field(Map<String, String> errors, String field, java.util.function.Supplier<String> rule) {
-        try { return rule.get(); } catch (IllegalStateException invalido) { errors.put(field, invalido.getMessage()); return null; }
-    }
-
-    private LocalDate birthDateField(Map<String, String> errors, Map<String, String> form) {
-        if (!form.containsKey("birthDate") || form.get("birthDate").isBlank()) return null;
-        LocalDate birth;
-        try { birth = optionalDate(form.get("birthDate")); }
-        catch (IllegalArgumentException formato) { errors.put("birthDate", formato.getMessage()); return null; }
-        try { return FieldPolicies.validateBirthDate(birth); }
-        catch (IllegalStateException invalido) { errors.put("birthDate", invalido.getMessage()); return null; }
     }
 
     private LocalDate requiredDate(String value) {
@@ -1750,9 +1757,7 @@ public final class SeniorManageApiServer {
             String[] parts = pair.split("=", 2);
             String key = decode(parts[0]);
             String value = parts.length == 2 ? decode(parts[1]) : "";
-            if (result.putIfAbsent(key, value) != null) {
-                throw new IllegalArgumentException("Campo duplicado en el formulario: " + key);
-            }
+            result.put(key, value);
         }
         return result;
     }
@@ -1806,7 +1811,7 @@ public final class SeniorManageApiServer {
     }
 
     private String decode(String value) {
-        return URLDecoder.decode(value.replace("+", "%2B"), StandardCharsets.UTF_8);
+        return URLDecoder.decode(value, StandardCharsets.UTF_8);
     }
 
     private String json(String value) {
@@ -1848,12 +1853,25 @@ public final class SeniorManageApiServer {
 
     private void addCorsHeaders(HttpExchange exchange) {
         String origin = exchange.getRequestHeaders().getFirst("Origin");
-        String allowedOrigin = System.getProperty(
-            "senior.manage.frontendOrigin",
+        if (origin == null || origin.isBlank()) {
+            return;
+        }
+        String configuredOrigins = firstNonBlank(
+            System.getenv("SENIOR_MANAGE_FRONTEND_ORIGIN"),
+            System.getProperty("senior.manage.frontendOrigin"),
             "http://localhost:5173"
         );
-        if (origin != null && (origin.equals(allowedOrigin)
-                || "http://127.0.0.1:5173".equals(origin))) {
+        boolean allowed = "http://127.0.0.1:5173".equals(origin);
+        if (!allowed && configuredOrigins != null) {
+            for (String candidate : configuredOrigins.split(",")) {
+                String trimmed = candidate.trim().replaceAll("/+$", "");
+                if (!trimmed.isEmpty() && origin.equals(trimmed)) {
+                    allowed = true;
+                    break;
+                }
+            }
+        }
+        if (allowed) {
             exchange.getResponseHeaders().set("Access-Control-Allow-Origin", origin);
             exchange.getResponseHeaders().set("Vary", "Origin");
             exchange.getResponseHeaders().set(
@@ -1875,44 +1893,15 @@ public final class SeniorManageApiServer {
         sendJson(exchange, status, "{\"error\":" + json(message == null ? "Solicitud inválida." : message) + "}");
     }
 
-    private void sendValidationError(HttpExchange exchange, Map<String, String> fieldErrors) throws IOException {
-        StringBuilder body = new StringBuilder("{\"error\":\"Revisa los datos del formulario.\",\"errors\":{");
-        boolean first = true;
-        for (Map.Entry<String, String> entry : fieldErrors.entrySet()) {
-            if (!first) body.append(',');
-            first = false;
-            body.append(json(entry.getKey())).append(':').append(json(entry.getValue()));
-        }
-        body.append("}}");
-        sendJson(exchange, 422, body.toString());
-    }
-
     private void sendJson(HttpExchange exchange, int status, String body) throws IOException {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", JSON_CONTENT_TYPE);
         exchange.getResponseHeaders().set("Cache-Control", "no-store");
-        if ("HEAD".equalsIgnoreCase(exchange.getRequestMethod())) {
-            exchange.sendResponseHeaders(status, -1);
-            return;
-        }
-        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        exchange.getResponseHeaders().set("X-Frame-Options", "DENY");
+        exchange.getResponseHeaders().set("Referrer-Policy", "strict-origin-when-cross-origin");
         exchange.sendResponseHeaders(status, bytes.length);
         exchange.getResponseBody().write(bytes);
-    }
-
-    /** Sesión opcional sin respuestas laterales, usada solo por /api/health. */
-    private Session optionalSession(HttpExchange exchange) {
-        String authorization = exchange.getRequestHeaders().getFirst("Authorization");
-        if (authorization == null || !authorization.startsWith("Bearer ")) return null;
-        try {
-            JwtTokenService.TokenClaims claims = jwtTokens.verify(authorization.substring("Bearer ".length()).trim());
-            UUID tokenId = UUID.fromString(claims.tokenId());
-            if (!sessionRepository.estaActiva(tokenId, claims.subject(), Instant.now())) return null;
-            Usuario user = users.buscarUsuarioPorCorreo(claims.subject());
-            if (user == null || !user.isActivo() || !user.getRol().name().equals(claims.role())) return null;
-            return new Session(tokenId, user.getCorreo(), user.getNombre(), user.getRol(), false);
-        } catch (RuntimeException invalida) {
-            return null;
-        }
     }
 
     private static final class Session {
@@ -1928,6 +1917,16 @@ public final class SeniorManageApiServer {
             this.name = name;
             this.role = role;
             this.mustChangePassword = mustChangePassword;
+        }
+    }
+
+    private static final class LoginAttemptWindow {
+        private int failedCount;
+        private Instant windowStart;
+        private Instant lockedUntil;
+
+        private LoginAttemptWindow(Instant windowStart) {
+            this.windowStart = windowStart;
         }
     }
 }

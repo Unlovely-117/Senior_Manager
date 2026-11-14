@@ -5,8 +5,6 @@ import domain.entities.Rol;
 import domain.entities.Usuario;
 import shared.security.PasswordHasher;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.List;
 
 // Esta clase contiene los casos de uso relacionados con la gestión de usuarios.
@@ -25,9 +23,8 @@ import java.util.List;
 // Para eso utiliza el repositorio.
 public class GestionarUsuarios {
 
-    // Hash ficticio para verificaciones dummy en autenticación (uniformiza tiempos de respuesta).
-    private static final PasswordHasher HASHER_FICTICIO = new PasswordHasher();
-    private static final String HASH_FICTICIO = HASHER_FICTICIO.generarHash("verificacion-uniforme-senior-manage");
+    private static final String DUMMY_HASH =
+        new PasswordHasher().generarHash("dummy-password-for-timing-mitigation");
 
     // Repositorio que utilizaremos para guardar y consultar usuarios.
     private final RepositorioUsuarios repositorio;
@@ -44,40 +41,25 @@ public class GestionarUsuarios {
     }
 
     public Usuario autenticarUsuario(String correo, String password) {
-        if (correo == null || correo.isBlank() || password == null || password.isBlank()) {
+        if (correo == null || correo.isBlank() || password == null || password.isBlank() || password.length() > 128) {
             return null;
         }
 
         Usuario usuario = repositorio.buscarPorCorreo(correo);
         if (usuario == null || !usuario.isActivo()) {
-            // Verificación dummy para uniformizar el tiempo de respuesta y no revelar si el correo existe.
-            passwordHasher.verificarPassword(password, HASH_FICTICIO);
+            passwordHasher.verificarPassword(password, DUMMY_HASH);
             return null;
         }
 
         String storedPassword = usuario.getPasswordHash();
-        boolean validPassword;
-        if (storedPassword.startsWith("PBKDF2-SHA256$")
-                || passwordHasher.esHashTemporal(storedPassword)) {
-            validPassword = passwordHasher.verificarPassword(password, storedPassword);
-        } else {
-            validPassword = MessageDigest.isEqual(
-                password.getBytes(StandardCharsets.UTF_8),
-                storedPassword.getBytes(StandardCharsets.UTF_8)
-            );
-            if (validPassword) {
-                usuario.cambiarPasswordHash(passwordHasher.generarHash(password));
-                repositorio.actualizar(usuario);
-            }
+        if (storedPassword == null
+                || (!storedPassword.startsWith("PBKDF2-SHA256$")
+                    && !passwordHasher.esHashTemporal(storedPassword))) {
+            passwordHasher.verificarPassword(password, DUMMY_HASH);
+            return null;
         }
 
-        // Moderniza a la política de iteraciones vigente tras un inicio de sesión correcto.
-        if (validPassword && passwordHasher.necesitaRehash(storedPassword)) {
-            usuario.cambiarPasswordHash(passwordHasher.generarHash(password));
-            repositorio.actualizar(usuario);
-        }
-
-        return validPassword ? usuario : null;
+        return passwordHasher.verificarPassword(password, storedPassword) ? usuario : null;
     }
 
     public boolean cambiarPassword(String correo, String password) {
@@ -94,12 +76,12 @@ public class GestionarUsuarios {
         return repositorio.actualizar(usuario);
     }
 
-    /** Sets a new temporary password that must be changed at next login. */
+    /** Sets a new password without exposing the existing hash or plaintext. */
     public boolean establecerPassword(String correo, String password) {
         if (correo == null || correo.isBlank() || password == null || password.isBlank()) return false;
         Usuario usuario = repositorio.buscarPorCorreo(correo);
         if (usuario == null) return false;
-        usuario.cambiarPasswordHash(passwordHasher.generarHashTemporal(password));
+        usuario.cambiarPasswordHash(passwordHasher.generarHash(password));
         return repositorio.actualizar(usuario);
     }
 

@@ -8,9 +8,8 @@ import {
     setUserStatus,
     updateUser,
 } from '../../application/managementService';
-import { ApiRequestError, ApiValidationError } from '../../infrastructure/managementApi';
+import { ApiRequestError } from '../../infrastructure/managementApi';
 import type { AccountRole, UserAccount } from '../../domain/models/management';
-import { ConfirmDialog } from '../components/ConfirmDialog';
 
 type UserForm = {
     name: string;
@@ -39,7 +38,6 @@ export const UsersPage: FC<UsersPageProps> = ({ currentUserEmail }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [statusUpdatingEmail, setStatusUpdatingEmail] = useState<string | null>(null);
-    const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; danger: boolean; action: () => Promise<void> } | null>(null);
 
     const refreshUsers = async () => {
         const result = await listUsers();
@@ -107,46 +105,22 @@ export const UsersPage: FC<UsersPageProps> = ({ currentUserEmail }) => {
                 setNotice('La cuenta se creó correctamente.');
             } else {
                 await updateUser(editingEmail, { name, email });
-                const applied: string[] = ['Datos del perfil'];
-                let partialNotice = '';
-                const previousRole = users.find((user) => user.email === editingEmail)?.role;
-                try {
-                    if (draft.password) {
-                        await setUserPassword(email, draft.password);
-                        applied.push('Contraseña');
-                    }
-                    if (draft.role !== previousRole) {
-                        await setUserRole(email, draft.role);
-                        applied.push('Rol');
-                    }
-                } catch (secondaryError) {
-                    partialNotice = secondaryError instanceof ApiValidationError
-                        ? secondaryError.message
-                        : secondaryError instanceof Error ? secondaryError.message : 'No se pudo completar un cambio adicional.';
+                if (draft.password) await setUserPassword(email, draft.password);
+                if (draft.role !== users.find((user) => user.email === editingEmail)?.role) {
+                    await setUserRole(email, draft.role);
                 }
-                if (partialNotice) {
-                    const pending: string[] = [];
-                    const originalName = users.find((user) => user.email === editingEmail)?.name ?? '';
-                    const originalEmail = editingEmail;
-                    if (draft.password && !applied.includes('Contraseña')) pending.push('la nueva contraseña');
-                    if (draft.role !== (users.find((user) => user.email === editingEmail)?.role) && !applied.includes('Rol')) pending.push('el cambio de rol');
-                    setNotice(`La cuenta se actualizó parcialmente: se aplicó ${applied.join(' y ')} para ${originalName} (${originalEmail}). Quedó pendiente: ${pending.join(' y ')}. Detalle: ${partialNotice}`);
-                } else if (applied.length > 1) {
-                    setNotice(`La cuenta se actualizó correctamente (${applied.join(', ')}).`);
-                } else {
-                    setNotice('La cuenta se actualizó correctamente.');
-                }
-                if (draft.password && !partialNotice) setNotice('La contraseña fue reemplazada. La persona deberá volver a iniciar sesión.');
+                setNotice('La cuenta se actualizó correctamente.');
             }
             await refreshUsers();
+            if (editingEmail !== null && draft.password) {
+                setNotice('La contraseña fue reemplazada. La persona deberá volver a iniciar sesión.');
+            }
             setIsFormOpen(false);
             setEditingEmail(null);
             setDraft(emptyForm);
         } catch (error) {
             if (error instanceof ApiRequestError && error.status === 403 && editingEmail === null) {
                 setFormError('Falta USERS/CREATE en los permisos efectivos de PostgreSQL. Ejecuta el comando --apply-approved descrito en backend/README.md contra la misma base de datos de la API y vuelve a intentarlo.');
-            } else if (error instanceof ApiValidationError) {
-                setFormError(error.message);
             } else {
                 setFormError(error instanceof Error ? error.message : 'No se pudo guardar la cuenta.');
             }
@@ -155,45 +129,34 @@ export const UsersPage: FC<UsersPageProps> = ({ currentUserEmail }) => {
         }
     };
 
-    const requestToggleStatus = (user: UserAccount) => {
-        setPendingConfirm({
-            title: user.active ? 'Desactivar acceso' : 'Activar acceso',
-            message: `¿Confirmas ${user.active ? 'desactivar el acceso de' : 'activar el acceso de'} ${user.name}?`,
-            danger: false,
-            action: async () => {
-                setNotice('');
-                setRequestError('');
-                setStatusUpdatingEmail(user.email);
-                try {
-                    await setUserStatus(user.email, !user.active);
-                    await refreshUsers();
-                    setNotice(`La cuenta de ${user.name} quedó ${user.active ? 'inactiva' : 'activa'}.`);
-                } catch (error) {
-                    setRequestError(error instanceof Error ? error.message : 'No se pudo cambiar el estado.');
-                } finally {
-                    setStatusUpdatingEmail(null);
-                }
-            },
-        });
+    const toggleStatus = async (user: UserAccount) => {
+        setNotice('');
+        setRequestError('');
+        setStatusUpdatingEmail(user.email);
+        try {
+            await setUserStatus(user.email, !user.active);
+            await refreshUsers();
+            setNotice(`La cuenta de ${user.name} quedó ${user.active ? 'inactiva' : 'activa'}.`);
+        } catch (error) {
+            setRequestError(error instanceof Error ? error.message : 'No se pudo cambiar el estado.');
+        } finally {
+            setStatusUpdatingEmail(null);
+        }
     };
 
-    const requestRemoveUser = (user: UserAccount) => {
-        setPendingConfirm({
-            title: 'Eliminar usuario',
-            message: `¿Eliminar la cuenta de ${user.name}? Esta acción no se puede deshacer.`,
-            danger: true,
-            action: async () => {
-                setNotice('');
-                setRequestError('');
-                try {
-                    await deleteUser(user.email);
-                    await refreshUsers();
-                    setNotice('La cuenta se eliminó correctamente.');
-                } catch (error) {
-                    setRequestError(error instanceof Error ? error.message : 'No se pudo eliminar la cuenta.');
-                }
-            },
-        });
+    const removeUser = async (user: UserAccount) => {
+        if (!window.confirm(`¿Eliminar la cuenta de ${user.name}? Esta acción no se puede deshacer.`)) {
+            return;
+        }
+        setNotice('');
+        setRequestError('');
+        try {
+            await deleteUser(user.email);
+            await refreshUsers();
+            setNotice('La cuenta se eliminó correctamente.');
+        } catch (error) {
+            setRequestError(error instanceof Error ? error.message : 'No se pudo eliminar la cuenta.');
+        }
     };
 
     const activeCount = users.filter((user) => user.active).length;
@@ -254,12 +217,12 @@ export const UsersPage: FC<UsersPageProps> = ({ currentUserEmail }) => {
                         </label>
                         {editingEmail === null && (
                             <label className="space-y-1.5 text-xs font-semibold text-gray-600">Contraseña inicial
-                                <input required type="password" minLength={12} autoComplete="new-password" className={inputClass} value={draft.password} onChange={(event) => setDraft({ ...draft, password: event.target.value })} />
+                                <input required type="password" minLength={8} autoComplete="new-password" className={inputClass} value={draft.password} onChange={(event) => setDraft({ ...draft, password: event.target.value })} />
                             </label>
                         )}
                         {editingEmail !== null && (
                             <label className="space-y-1.5 text-xs font-semibold text-gray-600">Nueva contraseña (opcional)
-                                <input type="password" minLength={12} autoComplete="new-password" className={inputClass} value={draft.password} onChange={(event) => setDraft({ ...draft, password: event.target.value })} placeholder="Déjalo vacío para conservarla" />
+                                <input type="password" minLength={8} autoComplete="new-password" className={inputClass} value={draft.password} onChange={(event) => setDraft({ ...draft, password: event.target.value })} placeholder="Déjalo vacío para conservarla" />
                             </label>
                         )}
                         <label className="space-y-1.5 text-xs font-semibold text-gray-600">Rol
@@ -324,14 +287,14 @@ export const UsersPage: FC<UsersPageProps> = ({ currentUserEmail }) => {
                                                 <button
                                                     type="button"
                                                     disabled={isCurrentUser || statusUpdatingEmail !== null}
-                                                    onClick={() => requestToggleStatus(user)}
+                                                    onClick={() => void toggleStatus(user)}
                                                     title={isCurrentUser ? 'No puedes cambiar el estado de tu propia cuenta.' : undefined}
                                                     aria-label={`${user.active ? 'Desactivar acceso de' : 'Activar acceso de'} ${user.name}`}
                                                     className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 ${user.active ? 'text-amber-800 hover:bg-amber-50' : 'text-emerald-800 hover:bg-emerald-50'}`}
                                                 >
                                                     {statusUpdatingEmail === user.email ? 'Actualizando...' : user.active ? 'Desactivar acceso' : 'Activar acceso'}
                                                 </button>
-                                                <button type="button" disabled={isCurrentUser} onClick={() => requestRemoveUser(user)} className="font-medium text-red-600 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline">Eliminar</button>
+                                                <button type="button" disabled={isCurrentUser} onClick={() => void removeUser(user)} className="font-medium text-red-600 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline">Eliminar</button>
                                             </td>
                                         </tr>
                                     );
@@ -345,15 +308,6 @@ export const UsersPage: FC<UsersPageProps> = ({ currentUserEmail }) => {
                 )}
                 <p className="border-t border-gray-100 px-5 py-3 text-xs text-gray-400">Los cambios se guardan en el backend. Para proteger el acceso, no puedes modificar ni eliminar tu propia cuenta desde aquí.</p>
             </div>
-
-            <ConfirmDialog
-                open={pendingConfirm !== null}
-                title={pendingConfirm?.title ?? ''}
-                message={pendingConfirm?.message ?? ''}
-                danger={pendingConfirm?.danger ?? false}
-                onConfirm={() => { const action = pendingConfirm?.action; setPendingConfirm(null); if (action) void action(); }}
-                onCancel={() => setPendingConfirm(null)}
-            />
         </section>
     );
 };

@@ -12,10 +12,11 @@ import javax.crypto.spec.PBEKeySpec;
 public class PasswordHasher {
 
     private static final String TEMPORARY_PASSWORD_PREFIX = "TEMPORARY$";
+    private static final int MAX_PASSWORD_LENGTH = 128;
 
     // Cantidad de iteraciones utilizadas por PBKDF2.
     // Entre más iteraciones, más difícil resulta atacar el hash.
-    private static final int ITERACIONES = 600_000;
+    private static final int ITERACIONES = 210000;
 
     // Tamaño de la clave generada, expresado en bits.
     private static final int LONGITUD_CLAVE = 256;
@@ -30,10 +31,15 @@ public class PasswordHasher {
     // Genera un hash seguro para una contraseña.
     public String generarHash(String password) {
 
-        // Verificamos que la contraseña exista.
+        // Verificamos que la contraseña exista y no exceda el máximo permitido.
         if (password == null || password.isBlank()) {
             throw new IllegalArgumentException(
                 "La contraseña no puede estar vacía."
+            );
+        }
+        if (password.length() > MAX_PASSWORD_LENGTH) {
+            throw new IllegalArgumentException(
+                "La contraseña no puede superar " + MAX_PASSWORD_LENGTH + " caracteres."
             );
         }
 
@@ -98,25 +104,13 @@ public class PasswordHasher {
             && hashAlmacenado.startsWith(TEMPORARY_PASSWORD_PREFIX);
     }
 
-    /** Indica si el hash fue generado con menos iteraciones que la política actual y conviene rehacerlo. */
-    public boolean necesitaRehash(String hashAlmacenado) {
-        if (hashAlmacenado == null) return false;
-        String hash = esHashTemporal(hashAlmacenado)
-            ? hashAlmacenado.substring(TEMPORARY_PASSWORD_PREFIX.length())
-            : hashAlmacenado;
-        if (!hash.startsWith("PBKDF2-SHA256$")) return false;
-        String[] partes = hash.split("\\$");
-        if (partes.length != 4) return false;
-        try { return Integer.parseInt(partes[1]) < ITERACIONES; } catch (NumberFormatException invalido) { return false; }
-    }
-
     // Verifica si una contraseña coincide con un hash almacenado.
     public boolean verificarPassword(
             String password,
             String hashAlmacenado) {
 
         // Validamos los datos recibidos.
-        if (password == null || hashAlmacenado == null) {
+        if (password == null || hashAlmacenado == null || password.length() > MAX_PASSWORD_LENGTH) {
             return false;
         }
 

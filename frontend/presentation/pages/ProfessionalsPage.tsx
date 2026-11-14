@@ -10,7 +10,6 @@ import {
     updateProfessional,
 } from '../../application/managementService';
 import type { Professional } from '../../domain/models/management';
-import { ConfirmDialog } from '../components/ConfirmDialog';
 
 type ProfessionalForm = {
     name: string;
@@ -26,16 +25,6 @@ type ProfessionalForm = {
 
 const emptyForm: ProfessionalForm = { name: '', document: '', email: '', phone: '', specialty: '', licenseNumber: '', education: '', experience: '', biography: '' };
 const inputClass = 'w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-teal-500 focus:bg-white focus:ring-4 focus:ring-teal-500/10';
-const phonePattern = '[+]?[0-9]{7,15}';
-
-/** Removes anything that is not a digit (dots, spaces or dashes typed while writing a cédula). */
-function sanitizeDigits(value: string): string {
-    return value.replace(/[^\d]/g, '').slice(0, 15);
-}
-
-function normalizePhone(value: string): string {
-    return value.replace(/\s+/g, '').slice(0, 16);
-}
 
 export const ProfessionalsPage: FC = () => {
     const [professionals, setProfessionals] = useState<Professional[]>([]);
@@ -53,7 +42,6 @@ export const ProfessionalsPage: FC = () => {
     const [isSaving, setIsSaving] = useState(false);
     const [reviewingDocument, setReviewingDocument] = useState<string | null>(null);
     const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
-    const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; danger: boolean; action: () => Promise<void> } | null>(null);
 
     const refreshProfessionals = async () => {
         setProfessionals(await listProfessionals());
@@ -220,34 +208,30 @@ export const ProfessionalsPage: FC = () => {
         }
     };
 
-    const removeProfessional = (professional: Professional) => {
-        const message = professional.accountLinked
+    const removeProfessional = async (professional: Professional) => {
+        const confirmation = professional.accountLinked
             ? professional.hasProfile
                 ? `¿Eliminar por completo a ${professional.name}? Se borrarán su ficha profesional y su cuenta de acceso.`
                 : `¿Eliminar la cuenta profesional de ${professional.name}?`
             : `¿Eliminar la ficha profesional de ${professional.name}?`;
-        setPendingConfirm({
-            title: 'Eliminar profesional',
-            message,
-            danger: true,
-            action: async () => {
-                setRequestError('');
-                setNotice('');
-                try {
-                    if (professional.hasProfile) {
-                        await deleteProfessional(professional.document);
-                    } else {
-                        await deleteProfessionalAccount(professional.email);
-                    }
-                    await refreshProfessionals();
-                    setNotice(professional.accountLinked
-                        ? `Se eliminó por completo a ${professional.name}, incluida su cuenta de acceso.`
-                        : `Se eliminó la ficha de ${professional.name}.`);
-                } catch (error) {
-                    setRequestError(error instanceof Error ? error.message : 'No se pudo eliminar la ficha profesional.');
-                }
-            },
-        });
+        if (!window.confirm(confirmation)) {
+            return;
+        }
+        setRequestError('');
+        setNotice('');
+        try {
+            if (professional.hasProfile) {
+                await deleteProfessional(professional.document);
+            } else {
+                await deleteProfessionalAccount(professional.email);
+            }
+            await refreshProfessionals();
+            setNotice(professional.accountLinked
+                ? `Se eliminó por completo a ${professional.name}, incluida su cuenta de acceso.`
+                : `Se eliminó la ficha de ${professional.name}.`);
+        } catch (error) {
+            setRequestError(error instanceof Error ? error.message : 'No se pudo eliminar la ficha profesional.');
+        }
     };
 
     const activeAccounts = professionals.filter(
@@ -357,13 +341,13 @@ export const ProfessionalsPage: FC = () => {
                             <input required maxLength={100} readOnly={editingDocument === null || linkedProfiles.some((professional) => professional.document === editingDocument)} className={`${inputClass} read-only:cursor-not-allowed read-only:opacity-70`} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
                         </label>
                         <label className="space-y-1.5 text-xs font-semibold text-gray-600">Documento
-                            <input required inputMode="numeric" pattern="[0-9]{5,15}" maxLength={15} disabled={editingDocument !== null} className={`${inputClass} disabled:cursor-not-allowed disabled:opacity-60`} value={draft.document} onChange={(event) => setDraft({ ...draft, document: sanitizeDigits(event.target.value) })} />
+                            <input required maxLength={40} disabled={editingDocument !== null} className={`${inputClass} disabled:cursor-not-allowed disabled:opacity-60`} value={draft.document} onChange={(event) => setDraft({ ...draft, document: event.target.value })} />
                         </label>
                         <label className="space-y-1.5 text-xs font-semibold text-gray-600">Correo de la cuenta
                             <input type="text" maxLength={120} readOnly className={`${inputClass} read-only:cursor-not-allowed read-only:opacity-70`} value={draft.email} />
                         </label>
                         <label className="space-y-1.5 text-xs font-semibold text-gray-600">Teléfono
-                            <input required inputMode="tel" type="tel" maxLength={16} pattern={phonePattern} className={inputClass} value={draft.phone} onChange={(event) => setDraft({ ...draft, phone: normalizePhone(event.target.value) })} />
+                            <input required type="tel" maxLength={40} className={inputClass} value={draft.phone} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} />
                         </label>
                         <label className="space-y-1.5 text-xs font-semibold text-gray-600">Profesión o especialidad
                             <input required maxLength={120} className={inputClass} value={draft.specialty} onChange={(event) => setDraft({ ...draft, specialty: event.target.value })} placeholder="Ej.: Fisioterapia geriátrica" />
@@ -377,11 +361,9 @@ export const ProfessionalsPage: FC = () => {
                     </label>
                     <label className="mt-4 block space-y-1.5 text-xs font-semibold text-gray-600">Experiencia relevante
                         <textarea maxLength={2000} rows={3} className={inputClass} value={draft.experience} onChange={(event) => setDraft({ ...draft, experience: event.target.value })} />
-                        <span className="mt-1 block text-right text-[11px] text-gray-400">{draft.experience.length}/2000</span>
                     </label>
                     <label className="mt-4 block space-y-1.5 text-xs font-semibold text-gray-600">Presentación profesional
                         <textarea maxLength={2000} rows={3} className={inputClass} value={draft.biography} onChange={(event) => setDraft({ ...draft, biography: event.target.value })} />
-                        <span className="mt-1 block text-right text-[11px] text-gray-400">{draft.biography.length}/2000</span>
                     </label>
                     <p className="mt-3 text-xs text-gray-500">La cuenta y el rol se administran en Usuarios y roles. Esta ficha guarda únicamente los datos profesionales complementarios.</p>
                     <button type="submit" disabled={isSaving || (editingDocument === null && !selectedAccountEmail)} className="mt-5 rounded-xl bg-[#0d7377] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-teal-800 disabled:cursor-wait disabled:opacity-60">
@@ -509,15 +491,6 @@ export const ProfessionalsPage: FC = () => {
                 )}
                 <p className="border-t border-gray-100 px-5 py-3 text-xs text-gray-400">Al eliminar un profesional vinculado, se borran tanto su ficha como su cuenta de acceso.</p>
             </div>
-
-            <ConfirmDialog
-                open={pendingConfirm !== null}
-                title={pendingConfirm?.title ?? ''}
-                message={pendingConfirm?.message ?? ''}
-                danger={pendingConfirm?.danger ?? true}
-                onConfirm={() => { const action = pendingConfirm?.action; setPendingConfirm(null); if (action) void action(); }}
-                onCancel={() => setPendingConfirm(null)}
-            />
         </section>
     );
 };

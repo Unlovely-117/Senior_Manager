@@ -43,8 +43,6 @@ public final class GestionarAsignaciones {
     public boolean puedeAcceder(String professionalEmail, UUID patientId) {
         Usuario account = users.buscarPorCorreo(professionalEmail);
         if (account == null || !account.isActivo() || account.getRol() != Rol.PROFESIONAL) return false;
-        Paciente paciente = patients.buscarPorId(patientId).orElse(null);
-        if (paciente == null || !paciente.isActivo()) return false;
         Profesional profile = professionals.buscarPorCuentaId(account.getId());
         return profile != null && profile.isActivo()
             && assignments.tieneAsignacionActiva(profile.getId(), patientId);

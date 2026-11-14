@@ -48,7 +48,8 @@ public final class ResetAdministratorPassword {
             Arrays.fill(confirmation, '\0');
         }
 
-        try (Connection connection = new JdbcConnectionProvider(configuration).open()) {
+        try (JdbcConnectionProvider provider = new JdbcConnectionProvider(configuration);
+    Connection connection = provider.open()) {
             connection.setAutoCommit(false);
             try {
                 UUID userId;

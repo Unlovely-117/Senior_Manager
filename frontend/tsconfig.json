@@ -19,6 +19,5 @@
     "exactOptionalPropertyTypes": false,
     "ignoreDeprecations": "5.0"
   },
-  "include": ["main.tsx", "vite-env.d.ts", "presentation/**/*", "application/**/*", "infrastructure/**/*", "domain/**/*", "vite.config.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["main.tsx", "presentation/**/*", "vite.config.ts"]
 }

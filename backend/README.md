@@ -1,4 +1,4 @@
-﻿# Backend Senior-Manager
+# Backend Senior-Manager
 
 ## Version de Java
 
@@ -39,7 +39,7 @@ La verificacion de `GET /api/health` devuelve estado `ok` solo cuando la conexio
 
 ## Inicializacion unica de permisos
 
-La matriz aprobada para esta inicializacion esta en `config/permission-matrix-approved.csv`; su SHA-256 aprobado es `C6AF77260919E4E78568F306F95044B01B2355CCFC66D24AAEFE0CBC3AE210F8`. Antes de ejecutar, configura en la terminal local las variables PostgreSQL `SENIOR_MANAGE_JDBC_URL`, `SENIOR_MANAGE_DB_USERNAME`, `SENIOR_MANAGE_DB_PASSWORD`, el secreto aleatorio externo de al menos 32 bytes `SENIOR_MANAGE_PERMISSION_BOOTSTRAP_SECRET` y `SENIOR_MANAGE_PERMISSION_MATRIX_SHA256` con esa huella. No guardes esos valores en el repositorio ni los compartas por chat. Con el esquema aplicado, Java 17 y Maven disponibles, desde la raiz del proyecto ejecuta:
+La matriz aprobada para esta inicializacion esta en `config/permission-matrix-approved.csv`; su SHA-256 aprobado es `6EDB8C419013B86D62BABAC0A9D1F9668918158AA332AA7BF5B46B9EE60FA969`. Antes de ejecutar, configura en la terminal local las variables PostgreSQL `SENIOR_MANAGE_JDBC_URL`, `SENIOR_MANAGE_DB_USERNAME`, `SENIOR_MANAGE_DB_PASSWORD`, el secreto aleatorio externo de al menos 32 bytes `SENIOR_MANAGE_PERMISSION_BOOTSTRAP_SECRET` y `SENIOR_MANAGE_PERMISSION_MATRIX_SHA256` con esa huella. No guardes esos valores en el repositorio ni los compartas por chat. Con el esquema aplicado, Java 17 y Maven disponibles, desde la raiz del proyecto ejecuta:
 
 ```powershell
 mvn -f backend/pom.xml "-Dsenior.manage.mainClass=infrastructure.bootstrap.PermissionBootstrap" exec:java "-Dexec.args=backend/config/permission-matrix-approved.csv"
@@ -64,12 +64,12 @@ Si no recuerdas la contrasena de ninguna cuenta administradora, ejecuta `backend
 
 En desarrollo, Vite reenvia `/api` al backend local en `http://127.0.0.1:8080`, de modo que funciona aunque Vite elija un puerto distinto de 5173. En produccion, define `VITE_API_URL` con la URL publica de la API y configura el origen permitido del frontend en el servidor.
 
-## Operación actual y persistencia (2026-10-16)
+## Operacion actual y persistencia (2026-10-16)
 
-- La API se conecta únicamente a PostgreSQL usando `SENIOR_MANAGE_JDBC_URL`, `SENIOR_MANAGE_DB_USERNAME` y `SENIOR_MANAGE_DB_PASSWORD`. No hay una base de datos básica dentro de este repositorio ni valores de conexión predeterminados.
-- Para localizar los archivos de datos del servidor ejecuta en PostgreSQL `SHOW data_directory;`. La base lógica, host y puerto se obtienen de la URL JDBC configurada para el proceso de la API.
-- Java 17 y Maven son requisitos. Aplica V1–V6 y la matriz de permisos según las guías enlazadas arriba antes de arrancar el servidor.
-- Históricamente se almacenaron usuarios/profesionales en TXT. Esa persistencia fue migrada a PostgreSQL. Se retiraron los TXT de datos y sus repositorios; la herramienta puntual de importación ya se retiró tras completar la migración.
-- El administrador puede editar la ficha completa. Si cambia el estado de verificación, usa las acciones de revisión en el directorio; editar datos no concede verificación automáticamente.
-- Para desarrollo: `mvn -f backend/pom.xml exec:java`; en otra terminal `npm --prefix frontend run dev`. La configuración de PostgreSQL/JWT se debe exportar en cada terminal/proceso que la necesita y nunca escribirse en Git.
+- La API se conecta Ãºnicamente a PostgreSQL usando `SENIOR_MANAGE_JDBC_URL`, `SENIOR_MANAGE_DB_USERNAME` y `SENIOR_MANAGE_DB_PASSWORD`. No hay una base de datos basica dentro de este repositorio ni valores de conexion predeterminados.
+- Para localizar los archivos de datos del servidor ejecuta en PostgreSQL `SHOW data_directory;`. La base lÃ³gica, host y puerto se obtienen de la URL JDBC configurada para el proceso de la API.
+- Java 17 y Maven son requisitos. Aplica V1â€“V5 y la matriz de permisos segÃºn las guÃ­as enlazadas arriba antes de arrancar el servidor.
+- Historicamente se almacenaron usuarios/profesionales en TXT. Esa persistencia fue migrada a PostgreSQL. Se retiraron los TXT de datos y sus repositorios; la herramienta puntual de importación ya se retiró tras completar la migración.
+- El administrador puede editar la ficha completa. Si cambia el estado de verificaciÃ³n, usa las acciones de revisiÃ³n en el directorio; editar datos no concede verificaciÃ³n automÃ¡ticamente.
+- Para desarrollo: `mvn -f backend/pom.xml exec:java`; en otra terminal `npm --prefix frontend run dev`. La configuraciÃ³n de PostgreSQL/JWT se debe exportar en cada terminal/proceso que la necesita y nunca escribirse en Git.
 

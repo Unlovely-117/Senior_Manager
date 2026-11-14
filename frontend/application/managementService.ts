@@ -18,6 +18,7 @@ export {
     listPatientAssignments,
     listPatientAssignmentDirectory,
     listRolePermissions,
+    listMyPermissions,
     setProfessionalPermission,
     assignPatientProfessional,
     endPatientAssignment,
@@ -43,4 +44,4 @@ export {
     listExercisePlans,
     assignExercisePlan,
 } from '../infrastructure/managementApi';
-export { ApiRequestError, ApiValidationError } from '../infrastructure/managementApi';
+export { ApiRequestError } from '../infrastructure/managementApi';
