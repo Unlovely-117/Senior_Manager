@@ -3,25 +3,48 @@ package application.usecases;
 import domain.RepositorioPermisos;
 import domain.entities.Permiso;
 import domain.entities.Rol;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /** Use case for administrator-only complete permission configuration updates. */
 public final class GestionarPermisos {
-    private static final Set<String> CONFIGURABLE_PROFESSIONAL_PERMISSIONS = Set.of(
+    private static final List<String> CONFIGURABLE_PROFESSIONAL_KEYS = List.of(
         "PACIENTES/READ", "PACIENTES/CREATE", "PACIENTES/UPDATE", "PACIENTES/HISTORY_READ",
         "ANTECEDENTES/READ", "ANTECEDENTES/CREATE", "ANTECEDENTES/UPDATE",
-        "CITAS/READ", "CITAS/CREATE", "CITAS/UPDATE", "CITAS/DELETE",
+        "CITAS/READ", "CITAS/CREATE", "CITAS/UPDATE",
         "EJERCICIOS/READ", "EJERCICIOS/CREATE"
     );
+    private static final Set<String> CONFIGURABLE_PROFESSIONAL_PERMISSIONS = Set.copyOf(CONFIGURABLE_PROFESSIONAL_KEYS);
     private final RepositorioPermisos repositorio;
     private final AuthorizationService authorization = new AuthorizationService();
     public GestionarPermisos(RepositorioPermisos repositorio) { this.repositorio = repositorio; }
+    public List<Permiso> listarEfectivosPorRol(Rol target) {
+        if (target == null) throw new IllegalArgumentException("El rol es obligatorio.");
+        if (target == Rol.ADMINISTRADOR) {
+            return AuthorizationService.adminPermissions();
+        }
+        Map<String, Boolean> configured = new HashMap<>();
+        for (Permiso item : repositorio.listarPorRol(Rol.PROFESIONAL)) {
+            configured.put(item.getModulo() + "/" + item.getOperacion(), item.isPermitido());
+        }
+        List<Permiso> result = new ArrayList<>(CONFIGURABLE_PROFESSIONAL_KEYS.size());
+        for (String key : CONFIGURABLE_PROFESSIONAL_KEYS) {
+            int separator = key.indexOf('/');
+            String module = key.substring(0, separator);
+            String operation = key.substring(separator + 1);
+            result.add(new Permiso(module, operation, configured.getOrDefault(key, false)));
+        }
+        return List.copyOf(result);
+    }
     public List<Permiso> listar(Rol actor, Rol target) {
         requireAdministrator(actor);
         requireEffectivePermission(actor, "READ");
-        return repositorio.listarPorRol(target);
+        return listarEfectivosPorRol(target);
     }
     public void reemplazar(Rol actor, Rol target, List<Permiso> permissions) {
         requireAdministrator(actor);

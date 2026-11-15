@@ -143,7 +143,7 @@ export const AppRouter: React.FC = () => {
                 case 'citas':
                     return <AdminAppointmentsPage onNavigate={setCurrentView} />;
                 case 'ejercicios':
-                    return <ExercisesPage readOnly />;
+                    return <ExercisesPage />;
                 default:
                     return <AdminDashboardPage onNavigate={setCurrentView} />;
             }

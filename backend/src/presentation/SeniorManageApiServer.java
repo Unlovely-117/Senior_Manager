@@ -984,7 +984,7 @@ public final class SeniorManageApiServer {
             return;
         }
         if (segments.length == 2 && "mis-permisos".equals(segments[1]) && "GET".equals(method)) {
-            sendJson(exchange, 200, serializePermissions(permissionRepository.listarPorRol(session.role)));
+            sendJson(exchange, 200, serializePermissions(permissionManagement.listarEfectivosPorRol(session.role)));
             return;
         }
         if (session.role != Rol.ADMINISTRADOR) {
@@ -1036,10 +1036,10 @@ public final class SeniorManageApiServer {
     private void handleClinicalFollowUp(HttpExchange exchange, String method, String[] segments, boolean appointments, Session session) throws IOException {
         if (!requireVerifiedProfessional(exchange, session)) return;
         String module = appointments ? "CITAS" : "EJERCICIOS";
-        String operation = method.equals("GET") ? "READ" : method.equals("POST") ? "CREATE" : method.equals("DELETE") ? "DELETE" : "UPDATE";
-        if (session.role == Rol.ADMINISTRADOR && !appointments && !"READ".equals(operation)) {
-            sendError(exchange, 403, "El administrador tiene acceso de solo lectura a ejercicios."); return;
-        }
+        String operation = method.equals("GET") ? "READ"
+            : method.equals("POST") ? "CREATE"
+            : (!appointments && method.equals("DELETE")) ? "DELETE"
+            : "UPDATE";
         if (!authorization.isAllowed(session.role, module, operation, permissionRepository)) {
             sendError(exchange, 403, "La configuración de permisos no autoriza esta operación."); return;
         }
@@ -1067,6 +1067,14 @@ public final class SeniorManageApiServer {
                     sendJson(exchange, 200, out.append(']').toString());
                 }
             } catch (SQLException e) { throw new PersistenceException("No se pudieron consultar los registros clínicos.", e); }
+            return;
+        }
+        if (!appointments && "GET".equals(method) && segments.length == 2 && "catalogo".equals(segments[1])) {
+            sendJson(exchange, 200, serializeFullExerciseCatalog());
+            return;
+        }
+        if (!appointments && "POST".equals(method) && segments.length == 2 && "catalogo".equals(segments[1])) {
+            createExerciseCatalogItem(exchange);
             return;
         }
         if (!appointments && "GET".equals(method) && segments.length == 3 && "catalogo".equals(segments[1])) {
@@ -1120,6 +1128,10 @@ public final class SeniorManageApiServer {
         sendError(exchange,405,"Método o ruta no permitidos.");
     }
 
+    private String serializeFullExerciseCatalog() {
+        return serializeExerciseCatalogRows(null);
+    }
+
     private String serializeExerciseCatalog(UUID patientId) {
         List<String> conditions = new java.util.ArrayList<>();
         try (Connection c = jdbcConnections.open(); PreparedStatement q = c.prepareStatement(
@@ -1129,7 +1141,10 @@ public final class SeniorManageApiServer {
                 while (r.next()) conditions.add(normalizeClinicalText(r.getString(1) + " " + r.getString(2)));
             }
         } catch (SQLException e) { throw new PersistenceException("No se pudieron revisar las alertas clínicas.", e); }
+        return serializeExerciseCatalogRows(conditions);
+    }
 
+    private String serializeExerciseCatalogRows(List<String> conditions) {
         StringBuilder out = new StringBuilder("[");
         try (Connection c = jdbcConnections.open(); PreparedStatement q = c.prepareStatement(
                 "SELECT id, nombre, categoria, descripcion, restricciones_clinicas FROM catalogo_ejercicios WHERE activo ORDER BY categoria, nombre");
@@ -1138,11 +1153,17 @@ public final class SeniorManageApiServer {
             while (r.next()) {
                 java.sql.Array sqlTerms = r.getArray("restricciones_clinicas");
                 Object[] terms = sqlTerms == null ? new Object[0] : (Object[]) sqlTerms.getArray();
-                java.util.LinkedHashSet<String> matches = new java.util.LinkedHashSet<>();
+                java.util.LinkedHashSet<String> alerts = new java.util.LinkedHashSet<>();
                 for (Object term : terms) {
-                    String normalizedTerm = normalizeClinicalText(String.valueOf(term));
-                    if (!normalizedTerm.isBlank() && conditions.stream().anyMatch(value -> value.contains(normalizedTerm))) {
-                        matches.add(String.valueOf(term));
+                    String rawTerm = String.valueOf(term).trim();
+                    if (rawTerm.isEmpty()) continue;
+                    if (conditions == null) {
+                        alerts.add(rawTerm);
+                    } else {
+                        String normalizedTerm = normalizeClinicalText(rawTerm);
+                        if (!normalizedTerm.isBlank() && conditions.stream().anyMatch(value -> value.contains(normalizedTerm))) {
+                            alerts.add(rawTerm);
+                        }
                     }
                 }
                 if (!first) out.append(',');
@@ -1151,12 +1172,67 @@ public final class SeniorManageApiServer {
                     .append(",\"name\":").append(json(r.getString("nombre")))
                     .append(",\"category\":").append(json(r.getString("categoria")))
                     .append(",\"description\":").append(json(r.getString("descripcion")))
-                    .append(",\"blocked\":").append(!matches.isEmpty())
-                    .append(",\"alerts\":").append(jsonArray(matches)).append('}');
+                    .append(",\"blocked\":").append(conditions != null && !alerts.isEmpty())
+                    .append(",\"alerts\":").append(jsonArray(alerts)).append('}');
                 if (sqlTerms != null) sqlTerms.free();
             }
         } catch (SQLException e) { throw new PersistenceException("No se pudo consultar el catálogo de ejercicios.", e); }
         return out.append(']').toString();
+    }
+
+    private void createExerciseCatalogItem(HttpExchange exchange) throws IOException {
+        Map<String, String> form = readForm(exchange);
+        String name = boundedText(form, "name", 120, true);
+        String category = boundedText(form, "category", 60, true);
+        String description = boundedText(form, "description", 500, true);
+        String rawRestrictions = boundedText(form, "restrictions", 1000, false);
+
+        String baseSlug = normalizeClinicalText(name).replaceAll("[^a-z0-9]+", "-").replaceAll("^-+|-+$", "");
+        if (baseSlug.isEmpty()) {
+            baseSlug = "ejercicio";
+        } else if (baseSlug.length() > 60) {
+            baseSlug = baseSlug.substring(0, 60).replaceAll("-+$", "");
+            if (baseSlug.isEmpty()) {
+                baseSlug = "ejercicio";
+            }
+        }
+
+        java.util.LinkedHashSet<String> restrictions = new java.util.LinkedHashSet<>();
+        if (rawRestrictions != null && !rawRestrictions.isBlank()) {
+            for (String part : rawRestrictions.split(",")) {
+                String cleaned = part.trim().toLowerCase(Locale.ROOT);
+                if (!cleaned.isEmpty()) {
+                    restrictions.add(cleaned);
+                }
+            }
+        }
+
+        try (Connection c = jdbcConnections.open()) {
+            String exerciseId = baseSlug;
+            try (PreparedStatement exists = c.prepareStatement("SELECT 1 FROM catalogo_ejercicios WHERE id = ?")) {
+                exists.setString(1, exerciseId);
+                try (ResultSet r = exists.executeQuery()) {
+                    if (r.next()) {
+                        exerciseId = baseSlug + "-" + UUID.randomUUID().toString().substring(0, 6);
+                    }
+                }
+            }
+            java.sql.Array restrictionArray = c.createArrayOf("text", restrictions.toArray(new String[0]));
+            try (PreparedStatement insert = c.prepareStatement(
+                    "INSERT INTO catalogo_ejercicios(id, nombre, categoria, descripcion, restricciones_clinicas, activo) VALUES(?, ?, ?, ?, ?, TRUE)")) {
+                insert.setString(1, exerciseId);
+                insert.setString(2, name);
+                insert.setString(3, category);
+                insert.setString(4, description);
+                insert.setArray(5, restrictionArray);
+                insert.executeUpdate();
+            } finally {
+                restrictionArray.free();
+            }
+        } catch (SQLException e) {
+            throw new PersistenceException("No se pudo crear el ejercicio en el catálogo.", e);
+        }
+        sendMessage(exchange, 201, "Ejercicio creado en el catálogo.");
     }
 
     private static String normalizeClinicalText(String value) {

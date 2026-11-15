@@ -40,6 +40,8 @@ export {
     updateAppointment,
     listExerciseFollowUps,
     createExerciseFollowUp,
+    listAllExerciseCatalog,
+    createExerciseCatalogItem,
     listExerciseCatalog,
     listExercisePlans,
     assignExercisePlan,
