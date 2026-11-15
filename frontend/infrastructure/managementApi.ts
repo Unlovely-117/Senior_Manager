@@ -269,6 +269,17 @@ export function listExerciseFollowUps(): Promise<ClinicalRecord[]> { return requ
 export function createExerciseFollowUp(values: { patientId: string; item: string; notes: string }): Promise<ApiMessage> {
     return request('/ejercicios', { method: 'POST', values });
 }
+export function listAllExerciseCatalog(): Promise<ExerciseCatalogItem[]> {
+    return request('/ejercicios/catalogo');
+}
+export function createExerciseCatalogItem(values: {
+    name: string;
+    category: string;
+    description: string;
+    restrictions: string;
+}): Promise<ApiMessage> {
+    return request('/ejercicios/catalogo', { method: 'POST', values });
+}
 export function listExerciseCatalog(patientId: string): Promise<ExerciseCatalogItem[]> {
     return request(`/ejercicios/catalogo/${encodeURIComponent(patientId)}`);
 }

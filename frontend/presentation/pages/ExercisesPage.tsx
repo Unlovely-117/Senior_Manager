@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState, type FC, type FormEvent } from 'react';
 import {
     assignExercisePlan,
+    createExerciseCatalogItem,
+    listAllExerciseCatalog,
     listExerciseCatalog,
     listExerciseFollowUps,
     listExercisePlans,
@@ -11,27 +13,34 @@ import type { Patient } from '../../domain/models/management';
 
 type Props = { readOnly?: boolean };
 const inputClass = 'mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-teal-500 focus:ring-4 focus:ring-teal-500/10';
+const exerciseCategories = ['Movilidad', 'Fuerza', 'Equilibrio', 'Resistencia', 'Flexibilidad', 'Respiración', 'Coordinación'] as const;
 
 export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
     const [plans, setPlans] = useState<ExercisePlan[]>([]);
     const [history, setHistory] = useState<ClinicalRecord[]>([]);
     const [patients, setPatients] = useState<Patient[]>([]);
+    const [allCatalog, setAllCatalog] = useState<ExerciseCatalogItem[]>([]);
     const [catalog, setCatalog] = useState<ExerciseCatalogItem[]>([]);
     const [patientId, setPatientId] = useState('');
     const [exerciseId, setExerciseId] = useState('');
+    const [newExercise, setNewExercise] = useState({ name: '', category: 'Movilidad', description: '', restrictions: '' });
     const [loading, setLoading] = useState(true);
     const [catalogLoading, setCatalogLoading] = useState(false);
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
+    const [creatingExercise, setCreatingExercise] = useState(false);
     const [saving, setSaving] = useState(false);
 
     const reload = useCallback(async () => {
         setLoading(true); setError('');
         try {
-            const [currentPlans, completed, assignedPatients] = await Promise.all([
-                listExercisePlans(), listExerciseFollowUps(), readOnly ? Promise.resolve([] as Patient[]) : listPatients(),
+            const [currentPlans, completed, fullCatalog, assignedPatients] = await Promise.all([
+                listExercisePlans(),
+                listExerciseFollowUps(),
+                listAllExerciseCatalog(),
+                readOnly ? Promise.resolve([] as Patient[]) : listPatients(),
             ]);
-            setPlans(currentPlans); setHistory(completed); setPatients(assignedPatients);
+            setPlans(currentPlans); setHistory(completed); setAllCatalog(fullCatalog); setPatients(assignedPatients);
         } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudieron cargar los ejercicios.'); }
         finally { setLoading(false); }
     }, [readOnly]);
@@ -50,6 +59,27 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
 
     const selectedExercise = catalog.find((item) => item.id === exerciseId);
     const blockedExercises = catalog.filter((item) => item.blocked);
+
+    const createCatalogExercise = async (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        setCreatingExercise(true); setError(''); setNotice('');
+        try {
+            const result = await createExerciseCatalogItem({
+                name: newExercise.name.trim(),
+                category: newExercise.category,
+                description: newExercise.description.trim(),
+                restrictions: newExercise.restrictions.trim(),
+            });
+            setNewExercise({ name: '', category: 'Movilidad', description: '', restrictions: '' });
+            await reload();
+            if (patientId) {
+                const updatedCatalog = await listExerciseCatalog(patientId);
+                setCatalog(updatedCatalog);
+            }
+            setNotice(result.message || 'Ejercicio creado en el catálogo.');
+        } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo crear el ejercicio en el catálogo.'); }
+        finally { setCreatingExercise(false); }
+    };
 
     const submit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -79,14 +109,66 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
         <header className="rounded-3xl bg-gradient-to-r from-[#083447] via-[#0b6670] to-[#087f79] p-6 text-white shadow-lg shadow-teal-950/10 sm:p-8">
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-teal-100">Actividad física segura</p>
             <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">Ejercicios</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-white/80">Consulta el catálogo, revisa las alertas asociadas a los antecedentes y agrega ejercicios al plan del paciente.</p>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-white/80">Crea ejercicios en el catálogo, revisa las alertas asociadas a los antecedentes y asigna planes seguros al paciente.</p>
         </header>
         {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</p>}
         {notice && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">{notice}</p>}
+        {!readOnly && <form onSubmit={(event) => void createCatalogExercise(event)} className="space-y-5 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm sm:p-7">
+            <div><h2 className="text-lg font-bold text-slate-900">Crear nuevo ejercicio en el catálogo</h2><p className="mt-1 text-sm text-slate-500">Registra nuevos ejercicios reutilizables con su guía técnica y alertas clínicas opcionales.</p></div>
+            <div className="grid gap-4 sm:grid-cols-2">
+                <label className="text-sm font-semibold text-slate-700">Nombre del ejercicio
+                    <input
+                        required
+                        maxLength={120}
+                        value={newExercise.name}
+                        onChange={(event) => setNewExercise((current) => ({ ...current, name: event.target.value }))}
+                        placeholder="Ej.: Elevación de talones con apoyo"
+                        className={inputClass}
+                    />
+                </label>
+                <label className="text-sm font-semibold text-slate-700">Categoría
+                    <select
+                        required
+                        value={newExercise.category}
+                        onChange={(event) => setNewExercise((current) => ({ ...current, category: event.target.value }))}
+                        className={inputClass}
+                    >
+                        {exerciseCategories.map((category) => <option key={category} value={category}>{category}</option>)}
+                    </select>
+                </label>
+            </div>
+            <label className="block text-sm font-semibold text-slate-700">Descripción / guía técnica
+                <textarea
+                    required
+                    maxLength={500}
+                    rows={3}
+                    value={newExercise.description}
+                    onChange={(event) => setNewExercise((current) => ({ ...current, description: event.target.value }))}
+                    placeholder="Describe postura inicial, ejecución segura y criterios de pausa"
+                    className={inputClass}
+                />
+            </label>
+            <label className="block text-sm font-semibold text-slate-700">Contraindicaciones / alertas clínicas opcionales (separadas por coma)
+                <input
+                    maxLength={1000}
+                    value={newExercise.restrictions}
+                    onChange={(event) => setNewExercise((current) => ({ ...current, restrictions: event.target.value }))}
+                    placeholder="Ej.: fractura, vertigo, hipertension no controlada"
+                    className={inputClass}
+                />
+            </label>
+            <button
+                type="submit"
+                disabled={creatingExercise || !newExercise.name.trim() || !newExercise.description.trim()}
+                className="rounded-xl bg-[#0d7377] px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+                {creatingExercise ? 'Guardando…' : 'Crear ejercicio en el catálogo'}
+            </button>
+        </form>}
         {!readOnly && <form onSubmit={(event) => void submit(event)} className="space-y-5 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm sm:p-7">
             <div><h2 className="text-lg font-bold text-slate-900">Agregar ejercicio al plan</h2><p className="mt-1 text-sm text-slate-500">La frecuencia y la carga deben ser definidas por el profesional tratante según su valoración.</p></div>
             <div className="grid gap-4 sm:grid-cols-2">
-                <label className="text-sm font-semibold text-slate-700">Paciente asignado
+                <label className="text-sm font-semibold text-slate-700">Paciente
                     <select required value={patientId} onChange={(event) => setPatientId(event.target.value)} className={inputClass}>
                         <option value="">Selecciona un paciente</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.fullName}</option>)}
                     </select>
@@ -123,6 +205,23 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
             </label>
             <button type="submit" disabled={saving || !patientId || !selectedExercise || selectedExercise.blocked || catalogLoading} className="rounded-xl bg-[#0d7377] px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50">{saving ? 'Guardando…' : 'Agregar al plan'}</button>
         </form>}
+
+        <section className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
+            <div className="border-b border-slate-100 p-5">
+                <h2 className="font-bold text-slate-900">Catálogo de ejercicios disponibles ({allCatalog.length})</h2>
+                <p className="mt-1 text-sm text-slate-500">Listado base del catálogo junto con sus restricciones clínicas configuradas.</p>
+            </div>
+            {loading && allCatalog.length === 0 ? <p className="p-6 text-center text-sm text-slate-500">Cargando catálogo…</p> : allCatalog.length === 0 ? <p className="p-6 text-center text-sm text-slate-500">Aún no hay ejercicios registrados en el catálogo.</p> : <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
+                {allCatalog.map((item) => <article key={item.id} className="flex flex-col justify-between rounded-xl border border-slate-100 bg-slate-50/70 p-4">
+                    <div>
+                        <span className="inline-block rounded-full bg-teal-100 px-2.5 py-0.5 text-xs font-semibold text-teal-800">{item.category}</span>
+                        <h3 className="mt-2 font-bold text-slate-900">{item.name}</h3>
+                        <p className="mt-1.5 text-sm leading-6 text-slate-600">{item.description}</p>
+                    </div>
+                    {item.alerts.length > 0 && <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900"><strong>Alertas clínicas:</strong> {item.alerts.join(', ')}</p>}
+                </article>)}
+            </div>}
+        </section>
 
         <section className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
             <div className="border-b border-slate-100 p-5"><h2 className="font-bold text-slate-900">Planes de ejercicio activos</h2><p className="mt-1 text-sm text-slate-500">Se muestran solo los planes permitidos para tu cuenta.</p></div>

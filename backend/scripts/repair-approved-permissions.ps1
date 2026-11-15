@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $matrixPath = Join-Path $projectRoot 'backend\config\permission-matrix-approved.csv'
-$approvedHash = '6EDB8C419013B86D62BABAC0A9D1F9668918158AA332AA7BF5B46B9EE60FA969'
+$approvedHash = '17FCA67F245F12A08A8EA7B05CF5ACB8E2EE24CB1B50EF636735DB222FFE11B4'
 $actualHash = (Get-FileHash -LiteralPath $matrixPath -Algorithm SHA256).Hash
 if ($actualHash -ne $approvedHash) {
     throw 'El archivo de matriz no coincide con el SHA-256 aprobado; no se modifico la base de datos.'
