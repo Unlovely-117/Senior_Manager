@@ -1,75 +1,103 @@
 # Backend Senior-Manager
 
-## Version de Java
+## Versión de Java
 
-El backend usa Java 17 como version minima y objetivo de compilacion. `pom.xml` fija `maven.compiler.release=17`; Maven rechazara fuentes que dependan de APIs posteriores. El frontend no forma parte de esta compilacion Java.
+El backend usa **Java 17** como versión mínima y objetivo de compilación (`maven.compiler.release=17` en `backend/pom.xml`).
 
-Requisitos locales: JDK 17 y Maven 3.9 o posterior. Comprueba que `java` y `javac` apuntan al JDK 17, no a un runtime antiguo:
+Requisitos locales: JDK 17 y Maven 3.9 o posterior. Comprueba las versiones activas antes de compilar:
 
-```powershell
+```bash
 java -version
 javac -version
 mvn -version
 ```
 
-En Windows, si hay varias versiones instaladas, configura `JAVA_HOME` con la ruta del JDK 17 y antepon `$env:JAVA_HOME\bin` a `PATH` en la terminal actual antes de ejecutar Maven.
+En Windows, si hay varias versiones instaladas, configura `JAVA_HOME` apuntando al JDK 17 y antepón `$env:JAVA_HOME\bin` a `PATH` en la terminal actual.
 
-## Compilar y probar login
+---
 
-Desde esta carpeta:
+## Compilar y ejecutar pruebas unitarias
 
-```powershell
-mvn clean test-compile
-mvn test-compile exec:java "-Dexec.classpathScope=test" "-Dexec.mainClass=PruebaLogin"
+Desde la raíz del repositorio (o dentro de `backend/` ajustando `-f`):
+
+```bash
+mvn -f backend/pom.xml clean test-compile
+mvn -f backend/pom.xml exec:java -Dexec.classpathScope=test -Dsenior.manage.mainClass=PruebaLogin
 ```
 
-`PruebaLogin` usa cuentas en memoria y una clave JWT de prueba; no requiere base de datos ni consulta archivos de usuarios. Las dependencias externas se resuelven desde Maven Central.
+`PruebaLogin` ejecuta 14 verificaciones aisladas en memoria (credenciales válidas/inválidas, cuenta inactiva, normalización de correo, contraseña temporal, claims JWT, firma alterada, audiencia y expiración) sin requerir PostgreSQL.
 
-## Configuracion para ejecutar la API
+---
 
-La API requiere Java 17 o posterior y las variables PostgreSQL y JWT descritas en `docs/sprints/sprint-1/implementation-status.md`. No se incluyen claves ni credenciales por defecto. Inicia solo si PostgreSQL responde, las migraciones V1/V2/V3/V4/V5 estan aplicadas y existe el marcador del bootstrap de permisos; asi evita arrancar parcialmente conectado. Las migraciones se aplican con el comando explicito de Flyway descrito en `migrations/README.md`.
+## Configuración y ejecución de la API
 
-Con PostgreSQL, JWT, migraciones y bootstrap configurados, desde la raiz inicia el backend con:
+### Variables de entorno requeridas
 
-```powershell
+| Variable | Uso |
+| :--- | :--- |
+| `SENIOR_MANAGE_JDBC_URL` | Cadena JDBC de PostgreSQL (ej. `jdbc:postgresql://127.0.0.1:5432/senior_manage`) |
+| `SENIOR_MANAGE_DB_USERNAME` | Usuario de conexión a PostgreSQL |
+| `SENIOR_MANAGE_DB_PASSWORD` | Contraseña de PostgreSQL |
+| `SENIOR_MANAGE_JWT_SECRET` | Secreto HS256 de al menos 32 bytes para firmar tokens |
+| `SENIOR_MANAGE_JWT_KEY_ID` | Identificador de clave JWT activa (`kid`) |
+| `SENIOR_MANAGE_JWT_ISSUER` | Emisor esperado del JWT |
+| `SENIOR_MANAGE_JWT_AUDIENCE` | Audiencia esperada del JWT |
+| `SENIOR_MANAGE_FRONTEND_ORIGIN` | Origen(es) permitidos por CORS (separados por coma) |
+| `PORT` / `SENIOR_MANAGE_PORT` | Puerto HTTP de escucha (por defecto `8080`) |
+| `SENIOR_MANAGE_BIND_ADDRESS` | IP de escucha (`127.0.0.1` en local; `0.0.0.0` en contenedor) |
+
+> Variables opcionales para rotación de JWT: `SENIOR_MANAGE_JWT_PREVIOUS_SECRET`, `SENIOR_MANAGE_JWT_PREVIOUS_KEY_ID` y `SENIOR_MANAGE_JWT_LIFETIME_SECONDS` (por defecto `900` s = 15 min).
+
+La API inicia únicamente si PostgreSQL responde, las migraciones **V1–V6** figuran aplicadas en `flyway_schema_history` y la tabla `permisos_rol` tiene el marcador de bootstrap (`permission_bootstrap_state`). Puedes consultar el estado en `GET /api/health` (`200 ok` o `503` con el paso pendiente).
+
+### Ejecución local manual
+
+```bash
 mvn -f backend/pom.xml exec:java
 ```
 
-La verificacion de `GET /api/health` devuelve estado `ok` solo cuando la conexion, el esquema y los permisos estan listos; en caso contrario responde `503` con el paso pendiente.
+En desarrollo, Vite reenvía `/api` al backend local en `http://127.0.0.1:8080`.
 
-## Inicializacion unica de permisos
+### Arranque automático en contenedores (`ContainerBootstrap`)
 
-La matriz aprobada para esta inicializacion esta en `config/permission-matrix-approved.csv`; su SHA-256 aprobado es `17FCA67F245F12A08A8EA7B05CF5ACB8E2EE24CB1B50EF636735DB222FFE11B4`. Antes de ejecutar, configura en la terminal local las variables PostgreSQL `SENIOR_MANAGE_JDBC_URL`, `SENIOR_MANAGE_DB_USERNAME`, `SENIOR_MANAGE_DB_PASSWORD`, el secreto aleatorio externo de al menos 32 bytes `SENIOR_MANAGE_PERMISSION_BOOTSTRAP_SECRET` y `SENIOR_MANAGE_PERMISSION_MATRIX_SHA256` con esa huella. No guardes esos valores en el repositorio ni los compartas por chat. Con el esquema aplicado, Java 17 y Maven disponibles, desde la raiz del proyecto ejecuta:
+Cuando se ejecuta mediante Docker (`Dockerfile` / `backend/Dockerfile`), la clase `infrastructure.bootstrap.ContainerBootstrap` realiza automáticamente antes de levantar `SeniorManageApiServer`:
+1. Espera a que PostgreSQL responda.
+2. Ejecuta las migraciones Flyway `V1–V6`.
+3. Crea la cuenta administradora inicial si se configuraron `SENIOR_MANAGE_INITIAL_ADMIN_EMAIL` y `SENIOR_MANAGE_INITIAL_ADMIN_PASSWORD` (12–128 caracteres).
+4. Verifica el SHA-256 de `backend/config/permission-matrix-approved.csv` y aplica/reconcilia la matriz aprobada de permisos en PostgreSQL.
 
-```powershell
-mvn -f backend/pom.xml "-Dsenior.manage.mainClass=infrastructure.bootstrap.PermissionBootstrap" exec:java "-Dexec.args=backend/config/permission-matrix-approved.csv"
+---
+
+## Inicialización y reconciliación de permisos
+
+La matriz oficial aprobada se encuentra en [config/permission-matrix-approved.csv](config/permission-matrix-approved.csv) y define:
+- **26 permisos permanentes** para `ADMINISTRADOR` (control total de usuarios, profesionales, asignaciones, permisos, pacientes, antecedentes, citas y ejercicios).
+- **12 permisos clínicos configurables** para `PROFESIONAL` (`PACIENTES`, `ANTECEDENTES`, `CITAS` y `EJERCICIOS`), todos acotados por asignación activa y verificación de ficha.
+
+Su huella SHA-256 aprobada vigente es:
+
+```text
+17FCA67F245F12A08A8EA7B05CF5ACB8E2EE24CB1B50EF636735DB222FFE11B4
 ```
 
-El CLI solicita el secreto y las credenciales actuales de una cuenta administradora activa mediante consola interactiva. La inicializacion normal solo funciona en una base sin permisos ni marcador previo; si ya hay configuracion, aborta sin sobrescribirla.
+Para inicializar o reconciliar la matriz manualmente fuera de Docker, define en tu terminal las variables JDBC, un secreto aleatorio externo (`SENIOR_MANAGE_PERMISSION_BOOTSTRAP_SECRET` ≥ 32 bytes) y `SENIOR_MANAGE_PERMISSION_MATRIX_SHA256` con la huella anterior, y ejecuta:
 
-Si la matriz no existe o el backend ya fue inicializado pero una decision aprobada falta o esta desactualizada (por ejemplo `ADMINISTRADOR,USERS,CREATE`), ejecuta el modo recomendado. Inicializa una base vacia o reconcilia una matriz existente; aborta si el marcador y las decisiones estan inconsistentes:
+```bash
+# Base nueva sin permisos:
+mvn -f backend/pom.xml -Dsenior.manage.mainClass=infrastructure.bootstrap.PermissionBootstrap exec:java -Dexec.args=backend/config/permission-matrix-approved.csv
 
-```powershell
-mvn -f backend/pom.xml "-Dsenior.manage.mainClass=infrastructure.bootstrap.PermissionBootstrap" "-Dexec.args=--apply-approved backend/config/permission-matrix-approved.csv" compile exec:java
+# Reconciliar una matriz ya existente al esquema/permisos actuales:
+mvn -f backend/pom.xml -Dsenior.manage.mainClass=infrastructure.bootstrap.PermissionBootstrap -Dexec.args="--apply-approved backend/config/permission-matrix-approved.csv" compile exec:java
 ```
 
-Este modo requiere un secreto externo de al menos 32 bytes configurado en SENIOR_MANAGE_PERMISSION_BOOTSTRAP_SECRET y autentica interactivamente una cuenta administradora activa. Reemplaza las decisiones en una transaccion y actualiza el actor, la fecha y el SHA auditado. Usa la misma base PostgreSQL que la API. La API no ejecuta la reconciliacion automaticamente.
+En Windows también están disponibles los asistentes en `backend/scripts/`:
+- [scripts/repair-approved-permissions.ps1](scripts/repair-approved-permissions.ps1): aplica migraciones y reconcilia la matriz aprobada de forma interactiva.
+- [scripts/create-recovery-admin.ps1](scripts/create-recovery-admin.ps1): crea una cuenta administradora de recuperación en PostgreSQL con contraseña PBKDF2 de mínimo 12 caracteres.
 
-En Windows ejecuta `backend/scripts/repair-approved-permissions.ps1` desde cualquier directorio del proyecto. Solicita la URL JDBC, usuario y contrasena PostgreSQL de forma interactiva; genera un secreto temporal dentro del proceso, aplica migraciones y ejecuta `--apply-approved`. El CLI solicita las credenciales de una cuenta administradora activa. Usa la misma base que la API y no compartas credenciales por chat.
+---
 
-### Crear una cuenta administradora de recuperacion
+## Persistencia e historial
 
-Si no recuerdas la contrasena de ninguna cuenta administradora, ejecuta `backend/scripts/create-recovery-admin.ps1`. Solicita la conexion PostgreSQL y luego nombre, correo y una contrasena de al menos 12 caracteres con confirmacion. Inserta una cuenta activa con rol ADMINISTRADOR y almacena la contrasena con PBKDF2; no cambia las cuentas existentes. Despues ejecuta `backend/scripts/repair-approved-permissions.ps1` e inicia sesion en el CLI con esa cuenta. Ambas herramientas deben apuntar a la base que usa la API.
-
-
-En desarrollo, Vite reenvia `/api` al backend local en `http://127.0.0.1:8080`, de modo que funciona aunque Vite elija un puerto distinto de 5173. En produccion, define `VITE_API_URL` con la URL publica de la API y configura el origen permitido del frontend en el servidor.
-
-## Operacion actual y persistencia (2026-10-16)
-
-- La API se conecta Ãºnicamente a PostgreSQL usando `SENIOR_MANAGE_JDBC_URL`, `SENIOR_MANAGE_DB_USERNAME` y `SENIOR_MANAGE_DB_PASSWORD`. No hay una base de datos basica dentro de este repositorio ni valores de conexion predeterminados.
-- Para localizar los archivos de datos del servidor ejecuta en PostgreSQL `SHOW data_directory;`. La base lÃ³gica, host y puerto se obtienen de la URL JDBC configurada para el proceso de la API.
-- Java 17 y Maven son requisitos. Aplica V1â€“V5 y la matriz de permisos segÃºn las guÃ­as enlazadas arriba antes de arrancar el servidor.
-- Historicamente se almacenaron usuarios/profesionales en TXT. Esa persistencia fue migrada a PostgreSQL. Se retiraron los TXT de datos y sus repositorios; la herramienta puntual de importación ya se retiró tras completar la migración.
-- El administrador puede editar la ficha completa. Si cambia el estado de verificaciÃ³n, usa las acciones de revisiÃ³n en el directorio; editar datos no concede verificaciÃ³n automÃ¡ticamente.
-- Para desarrollo: `mvn -f backend/pom.xml exec:java`; en otra terminal `npm --prefix frontend run dev`. La configuraciÃ³n de PostgreSQL/JWT se debe exportar en cada terminal/proceso que la necesita y nunca escribirse en Git.
-
+- PostgreSQL es el único almacenamiento activo mediante JDBC y `PreparedStatement`.
+- El almacenamiento temprano en archivos TXT (`backend/data/`) y las utilidades de migración/importación de texto fueron retirados del proyecto.
+- Para localizar los archivos físicos del servidor PostgreSQL consulta `SHOW data_directory;` directamente en tu instancia.

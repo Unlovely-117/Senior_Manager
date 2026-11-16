@@ -4,6 +4,9 @@ import {
     createPatient,
     createPatientHistory,
     deactivatePatient,
+    listAppointments,
+    listExerciseFollowUps,
+    listExercisePlans,
     listMyPermissions,
     listPatientHistory,
     listPatients,
@@ -11,6 +14,7 @@ import {
     updatePatient,
     updatePatientHistory,
 } from '../../application/managementService';
+import type { ClinicalRecord, ExercisePlan } from '../../infrastructure/managementApi';
 import type { Patient, PatientHistory, RolePermission } from '../../domain/models/management';
 
 type Props = { isAdmin?: boolean };
@@ -75,6 +79,10 @@ export const ElderlyPage: FC<Props> = ({ isAdmin = false }) => {
     const [showHistorical, setShowHistorical] = useState(false);
     const [selected, setSelected] = useState<Patient | null>(null);
     const [history, setHistory] = useState<PatientHistory[]>([]);
+    const [patientRoutines, setPatientRoutines] = useState<ExercisePlan[]>([]);
+    const [patientAppointments, setPatientAppointments] = useState<ClinicalRecord[]>([]);
+    const [patientFollowUps, setPatientFollowUps] = useState<ClinicalRecord[]>([]);
+    const [evolutionLoading, setEvolutionLoading] = useState(false);
     const [form, setForm] = useState<PatientForm>(emptyPatient);
     const [editing, setEditing] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -162,6 +170,41 @@ export const ElderlyPage: FC<Props> = ({ isAdmin = false }) => {
             .finally(() => { if (active) setHistoryLoading(false); });
         return () => { active = false; };
     }, [selected?.id, canReadHistory]);
+
+    useEffect(() => {
+        if (!selected) {
+            setPatientRoutines([]);
+            setPatientAppointments([]);
+            setPatientFollowUps([]);
+            setEvolutionLoading(false);
+            return;
+        }
+        let active = true;
+        setEvolutionLoading(true);
+        Promise.allSettled([listExercisePlans(), listAppointments(), listExerciseFollowUps()])
+            .then(([plansResult, appointmentsResult, followUpsResult]) => {
+                if (!active) return;
+                setPatientRoutines(
+                    plansResult.status === 'fulfilled'
+                        ? plansResult.value.filter((item) => item.patientId === selected.id)
+                        : [],
+                );
+                setPatientAppointments(
+                    appointmentsResult.status === 'fulfilled'
+                        ? appointmentsResult.value.filter((item) => item.patientId === selected.id)
+                        : [],
+                );
+                setPatientFollowUps(
+                    followUpsResult.status === 'fulfilled'
+                        ? followUpsResult.value.filter((item) => item.patientId === selected.id)
+                        : [],
+                );
+            })
+            .finally(() => {
+                if (active) setEvolutionLoading(false);
+            });
+        return () => { active = false; };
+    }, [selected?.id]);
 
     const submitPatient = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -398,6 +441,91 @@ export const ElderlyPage: FC<Props> = ({ isAdmin = false }) => {
                                 </form>
                             )}
                         </div>
+                        <section className="space-y-4 border-t border-gray-100 pt-4" aria-labelledby="patient-evolution-heading">
+                            <div>
+                                <h3 id="patient-evolution-heading" className="text-sm font-semibold text-slate-800">Historial y evolución del paciente</h3>
+                                <p className="mt-1 text-xs text-gray-500">Rutinas actuales e históricas, citas registradas y seguimientos de actividad.</p>
+                            </div>
+                            {evolutionLoading ? (
+                                <p role="status" className="text-sm text-gray-600">Cargando evolución clínica…</p>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Rutinas de ejercicio</h4>
+                                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{patientRoutines.length}</span>
+                                        </div>
+                                        {patientRoutines.length === 0 ? (
+                                            <p className="text-xs text-gray-500">Sin rutinas de ejercicio registradas para este paciente.</p>
+                                        ) : (
+                                            <ul className="space-y-2">
+                                                {patientRoutines.map((routine) => (
+                                                    <li key={routine.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs">
+                                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                                            <span className="font-semibold text-slate-800">{routine.exerciseName} · {routine.category}</span>
+                                                            <span className={`rounded-full px-2 py-0.5 font-semibold ${routine.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                                                                {routine.active ? 'Activa' : 'Histórica'}
+                                                            </span>
+                                                        </div>
+                                                        <p className="mt-1 text-slate-600">
+                                                            {routine.frequency}
+                                                            {routine.sets !== null && ` · ${routine.sets} series`}
+                                                            {routine.repetitions !== null && ` · ${routine.repetitions} reps`}
+                                                            {routine.durationMinutes !== null && ` · ${routine.durationMinutes} min`}
+                                                        </p>
+                                                        {routine.notes && <p className="mt-1 text-slate-500">{routine.notes}</p>}
+                                                        <time className="mt-1 block text-[11px] text-slate-400">{new Date(routine.date).toLocaleString()}</time>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Citas y sesiones</h4>
+                                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{patientAppointments.length}</span>
+                                        </div>
+                                        {patientAppointments.length === 0 ? (
+                                            <p className="text-xs text-gray-500">Sin citas registradas para este paciente.</p>
+                                        ) : (
+                                            <ul className="space-y-2">
+                                                {patientAppointments.map((appointment) => (
+                                                    <li key={appointment.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs">
+                                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                                            <span className="font-semibold text-slate-800">{appointment.item}</span>
+                                                            <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-600">{appointment.notes}</span>
+                                                        </div>
+                                                        <p className="mt-1 text-slate-600">
+                                                            {new Date(appointment.date).toLocaleString()}
+                                                            {appointment.professionalName ? ` · ${appointment.professionalName}` : ''}
+                                                        </p>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+
+                                    {patientFollowUps.length > 0 && (
+                                        <div className="space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Seguimientos de actividad</h4>
+                                                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{patientFollowUps.length}</span>
+                                            </div>
+                                            <ul className="space-y-2">
+                                                {patientFollowUps.map((followUp) => (
+                                                    <li key={followUp.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs">
+                                                        <p className="font-semibold text-slate-800">{followUp.item}</p>
+                                                        <p className="mt-1 text-slate-600">{followUp.notes}</p>
+                                                        <time className="mt-1 block text-[11px] text-slate-400">{new Date(followUp.date).toLocaleString()}</time>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </section>
                     </section>}
                 </div>
             </div>

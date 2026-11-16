@@ -152,7 +152,7 @@ export const AppRouter: React.FC = () => {
         if (role === 'professional') {
             switch (currentView) {
                 case 'mi-panel':
-                    return <ProfessionalDashboardPage />;
+                    return <ProfessionalDashboardPage onNavigate={setCurrentView} />;
                 case 'mis-pacientes':
                     return <ElderlyPage />;
                 case 'ejercicios':
@@ -162,7 +162,7 @@ export const AppRouter: React.FC = () => {
                 case 'mi-ficha':
                     return <ProfessionalProfilePage />;
                 default:
-                    return <ProfessionalDashboardPage />;
+                    return <ProfessionalDashboardPage onNavigate={setCurrentView} />;
             }
         }
 
