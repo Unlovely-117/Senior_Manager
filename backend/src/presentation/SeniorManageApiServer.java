@@ -1040,7 +1040,10 @@ public final class SeniorManageApiServer {
             : method.equals("POST") ? "CREATE"
             : (!appointments && method.equals("DELETE")) ? "DELETE"
             : "UPDATE";
-        if (!authorization.isAllowed(session.role, module, operation, permissionRepository)) {
+        boolean authorized = authorization.isAllowed(session.role, module, operation, permissionRepository)
+            || (!appointments && "UPDATE".equals(operation)
+                && authorization.isAllowed(session.role, "EJERCICIOS", "CREATE", permissionRepository));
+        if (!authorized) {
             sendError(exchange, 403, "La configuración de permisos no autoriza esta operación."); return;
         }
         if (!appointments && "DELETE".equals(operation)) { sendError(exchange, 405, "No se permite eliminar seguimientos clínicos."); return; }
@@ -1077,6 +1080,10 @@ public final class SeniorManageApiServer {
             createExerciseCatalogItem(exchange);
             return;
         }
+        if (!appointments && "PUT".equals(method) && segments.length == 3 && "catalogo".equals(segments[1])) {
+            updateExerciseCatalogItem(exchange, decode(segments[2]));
+            return;
+        }
         if (!appointments && "GET".equals(method) && segments.length == 3 && "catalogo".equals(segments[1])) {
             UUID patientId = UUID.fromString(segments[2]);
             if (!activePatient(patientId)) { sendError(exchange, 404, "Paciente activo no encontrado."); return; }
@@ -1092,6 +1099,10 @@ public final class SeniorManageApiServer {
         }
         if (!appointments && "POST".equals(method) && segments.length == 2 && "planes".equals(segments[1])) {
             createExercisePlan(exchange, session);
+            return;
+        }
+        if (!appointments && "PUT".equals(method) && segments.length == 3 && "planes".equals(segments[1])) {
+            updateExercisePlan(exchange, decode(segments[2]), session);
             return;
         }
         if (!appointments && "POST".equals(method) && segments.length == 1) {
@@ -1197,15 +1208,7 @@ public final class SeniorManageApiServer {
             }
         }
 
-        java.util.LinkedHashSet<String> restrictions = new java.util.LinkedHashSet<>();
-        if (rawRestrictions != null && !rawRestrictions.isBlank()) {
-            for (String part : rawRestrictions.split(",")) {
-                String cleaned = part.trim().toLowerCase(Locale.ROOT);
-                if (!cleaned.isEmpty()) {
-                    restrictions.add(cleaned);
-                }
-            }
-        }
+        java.util.LinkedHashSet<String> restrictions = parseRestrictions(rawRestrictions);
 
         try (Connection c = jdbcConnections.open()) {
             String exerciseId = baseSlug;
@@ -1233,6 +1236,52 @@ public final class SeniorManageApiServer {
             throw new PersistenceException("No se pudo crear el ejercicio en el catálogo.", e);
         }
         sendMessage(exchange, 201, "Ejercicio creado en el catálogo.");
+    }
+
+    private void updateExerciseCatalogItem(HttpExchange exchange, String exerciseId) throws IOException {
+        if (exerciseId == null || exerciseId.isBlank()) {
+            throw new IllegalArgumentException("El identificador del ejercicio es obligatorio.");
+        }
+        Map<String, String> form = readForm(exchange);
+        String name = boundedText(form, "name", 120, true);
+        String category = boundedText(form, "category", 60, true);
+        String description = boundedText(form, "description", 500, true);
+        String rawRestrictions = boundedText(form, "restrictions", 1000, false);
+        java.util.LinkedHashSet<String> restrictions = parseRestrictions(rawRestrictions);
+
+        try (Connection c = jdbcConnections.open()) {
+            java.sql.Array restrictionArray = c.createArrayOf("text", restrictions.toArray(new String[0]));
+            try (PreparedStatement update = c.prepareStatement(
+                    "UPDATE catalogo_ejercicios SET nombre = ?, categoria = ?, descripcion = ?, restricciones_clinicas = ? WHERE id = ? AND activo")) {
+                update.setString(1, name);
+                update.setString(2, category);
+                update.setString(3, description);
+                update.setArray(4, restrictionArray);
+                update.setString(5, exerciseId);
+                if (update.executeUpdate() == 0) {
+                    sendError(exchange, 404, "Ejercicio no encontrado en el catálogo.");
+                    return;
+                }
+            } finally {
+                restrictionArray.free();
+            }
+        } catch (SQLException e) {
+            throw new PersistenceException("No se pudo actualizar el ejercicio en el catálogo.", e);
+        }
+        sendMessage(exchange, 200, "Ejercicio del catálogo actualizado.");
+    }
+
+    private static java.util.LinkedHashSet<String> parseRestrictions(String rawRestrictions) {
+        java.util.LinkedHashSet<String> restrictions = new java.util.LinkedHashSet<>();
+        if (rawRestrictions != null && !rawRestrictions.isBlank()) {
+            for (String part : rawRestrictions.split(",")) {
+                String cleaned = part.trim().toLowerCase(Locale.ROOT);
+                if (!cleaned.isEmpty()) {
+                    restrictions.add(cleaned);
+                }
+            }
+        }
+        return restrictions;
     }
 
     private static String normalizeClinicalText(String value) {
@@ -1285,6 +1334,86 @@ public final class SeniorManageApiServer {
         sendMessage(exchange, 201, "Ejercicio asignado al paciente.");
     }
 
+    private void updateExercisePlan(HttpExchange exchange, String rawPlanId, Session session) throws IOException {
+        UUID planId = UUID.fromString(rawPlanId);
+        UUID patientId;
+        String exerciseId;
+        String currentFrequency;
+        Integer currentSets;
+        Integer currentRepetitions;
+        Integer currentDuration;
+        String currentNotes;
+        boolean currentActive;
+
+        String selectSql = "SELECT paciente_id, ejercicio_id, frecuencia, series, repeticiones, duracion_minutos, indicaciones, activo "
+            + "FROM planes_ejercicios WHERE id = ?";
+        try (Connection c = jdbcConnections.open(); PreparedStatement q = c.prepareStatement(selectSql)) {
+            q.setObject(1, planId);
+            try (ResultSet r = q.executeQuery()) {
+                if (!r.next()) {
+                    sendError(exchange, 404, "Registro de rutina no encontrado.");
+                    return;
+                }
+                patientId = r.getObject(1, UUID.class);
+                exerciseId = r.getString(2);
+                currentFrequency = r.getString(3);
+                currentSets = r.getObject(4) == null ? null : r.getInt(4);
+                currentRepetitions = r.getObject(5) == null ? null : r.getInt(5);
+                currentDuration = r.getObject(6) == null ? null : r.getInt(6);
+                currentNotes = r.getString(7);
+                currentActive = r.getBoolean(8);
+            }
+        } catch (SQLException e) {
+            throw new PersistenceException("No se pudo consultar la rutina.", e);
+        }
+
+        if (!activePatient(patientId)) {
+            sendError(exchange, 404, "Paciente activo no encontrado.");
+            return;
+        }
+        if (session.role == Rol.PROFESIONAL && !currentlyAssigned(session.email, patientId)) {
+            sendError(exchange, 403, "Solo puedes modificar rutinas de un paciente actualmente asignado a tu cuenta.");
+            return;
+        }
+
+        Map<String, String> form = readForm(exchange);
+        String frequency = form.containsKey("frequency") ? boundedText(form, "frequency", 120, true) : currentFrequency;
+        String notes = form.containsKey("notes")
+            ? boundedText(form, "notes", 2000, false)
+            : (currentNotes == null ? "" : currentNotes);
+        Integer sets = form.containsKey("sets") ? optionalBoundedInteger(form, "sets", 1, 20) : currentSets;
+        Integer repetitions = form.containsKey("repetitions") ? optionalBoundedInteger(form, "repetitions", 1, 200) : currentRepetitions;
+        Integer duration = form.containsKey("durationMinutes") ? optionalBoundedInteger(form, "durationMinutes", 1, 240) : currentDuration;
+        boolean newActive = form.containsKey("active") && !form.get("active").isBlank()
+            ? parseBoolean(form.get("active").trim())
+            : currentActive;
+
+        String details = exerciseAlerts(patientId, exerciseId);
+        if (details == null) {
+            sendError(exchange, 404, "Ejercicio no encontrado en el catálogo.");
+            return;
+        }
+        if (newActive && !details.isBlank()) {
+            sendError(exchange, 409, "Alerta clínica: no actives este ejercicio. Coincide con antecedentes registrados (" + details + "); solicita valoración del profesional tratante.");
+            return;
+        }
+
+        String updateSql = "UPDATE planes_ejercicios SET frecuencia = ?, series = ?, repeticiones = ?, duracion_minutos = ?, indicaciones = ?, activo = ? WHERE id = ?";
+        try (Connection c = jdbcConnections.open(); PreparedStatement q = c.prepareStatement(updateSql)) {
+            q.setString(1, frequency);
+            if (sets == null) q.setNull(2, java.sql.Types.SMALLINT); else q.setInt(2, sets);
+            if (repetitions == null) q.setNull(3, java.sql.Types.SMALLINT); else q.setInt(3, repetitions);
+            if (duration == null) q.setNull(4, java.sql.Types.SMALLINT); else q.setInt(4, duration);
+            q.setString(5, notes);
+            q.setBoolean(6, newActive);
+            q.setObject(7, planId);
+            q.executeUpdate();
+        } catch (SQLException e) {
+            throw new PersistenceException("No se pudo actualizar la rutina.", e);
+        }
+        sendMessage(exchange, 200, "Rutina actualizada.");
+    }
+
     private String exerciseAlerts(UUID patientId, String exerciseId) {
         List<String> conditions = new java.util.ArrayList<>();
         try (Connection c = jdbcConnections.open(); PreparedStatement q = c.prepareStatement(
@@ -1318,10 +1447,10 @@ public final class SeniorManageApiServer {
     }
 
     private String serializeExercisePlans(Session session) {
-        String sql = "SELECT p.id,p.paciente_id,pa.nombre_completo,e.id,e.nombre,e.categoria,p.frecuencia,p.series,p.repeticiones,p.duracion_minutos,p.indicaciones,p.asignado_en "
-            + "FROM planes_ejercicios p JOIN pacientes pa ON pa.id=p.paciente_id JOIN catalogo_ejercicios e ON e.id=p.ejercicio_id WHERE p.activo AND pa.activo ";
+        String sql = "SELECT p.id,p.paciente_id,pa.nombre_completo,e.id,e.nombre,e.categoria,p.frecuencia,p.series,p.repeticiones,p.duracion_minutos,p.indicaciones,p.asignado_en,p.activo "
+            + "FROM planes_ejercicios p JOIN pacientes pa ON pa.id=p.paciente_id JOIN catalogo_ejercicios e ON e.id=p.ejercicio_id WHERE pa.activo ";
         if (session.role == Rol.PROFESIONAL) sql += "AND EXISTS(SELECT 1 FROM asignaciones_profesional_paciente a JOIN profesionales pr ON pr.id=a.profesional_id JOIN usuarios u ON u.id=pr.usuario_id WHERE a.paciente_id=p.paciente_id AND lower(trim(u.correo))=lower(trim(?)) AND u.activo AND pr.activo AND a.estado='ACTIVA' AND a.fecha_fin IS NULL) ";
-        sql += "ORDER BY p.asignado_en DESC";
+        sql += "ORDER BY p.activo DESC, p.asignado_en DESC";
         try (Connection c = jdbcConnections.open(); PreparedStatement q = c.prepareStatement(sql)) {
             if (session.role == Rol.PROFESIONAL) q.setString(1, session.email);
             try (ResultSet r = q.executeQuery()) {
@@ -1334,7 +1463,8 @@ public final class SeniorManageApiServer {
                         .append(",\"frequency\":").append(json(r.getString(7))).append(",\"sets\":").append(r.getObject(8) == null ? "null" : r.getInt(8))
                         .append(",\"repetitions\":").append(r.getObject(9) == null ? "null" : r.getInt(9))
                         .append(",\"durationMinutes\":").append(r.getObject(10) == null ? "null" : r.getInt(10))
-                        .append(",\"notes\":").append(json(r.getString(11))).append(",\"date\":").append(json(r.getString(12))).append('}');
+                        .append(",\"notes\":").append(json(r.getString(11))).append(",\"date\":").append(json(r.getString(12)))
+                        .append(",\"active\":").append(r.getBoolean(13)).append('}');
                 }
                 return out.append(']').toString();
             }

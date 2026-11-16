@@ -1,41 +1,38 @@
-﻿# Estado de implementación
+# Estado de implementación — Sprint 1
 
-Actualizado: 2026-10-16. Esta página resume el estado del código; la disponibilidad real depende de las variables configuradas en el equipo que ejecuta el servidor.
+**Actualizado:** 2026-11-15  
+**Estado del Sprint 1 (`PB-01`, `PB-02`, `PB-03`, `PB-04`, `PB-26`):** **Completado**.
 
-## Arquitectura y datos
+---
 
-- El frontend React/TypeScript consume la API Java 17 mediante `/api`.
-- PostgreSQL es la persistencia activa para usuarios, profesionales, sesiones, permisos, pacientes, antecedentes, asignaciones, citas y ejercicios.
-- El proyecto usó inicialmente TXT para usuarios y profesionales; esos datos se migraron a PostgreSQL y se retiraron los archivos/adaptadores locales de TXT.
-- La importación inicial ya se completó y su herramienta puntual se retiró.
-- La base no se encuentra dentro del repositorio. `SENIOR_MANAGE_JDBC_URL` determina host, puerto y nombre de base. `SHOW data_directory;` consulta el directorio físico desde PostgreSQL.
+## 1. Alcance implementado
 
-## Funciones de interfaz conectadas
+### Seguridad y Autenticación (`PB-01`, `PB-02`, `PB-26`)
+- **Login endurecido (`POST /api/auth/login`):** hash `PBKDF2WithHmacSHA256` a `210 000` iteraciones con límite de `128` caracteres, verificación en tiempo constante contra `DUMMY_HASH` cuando el correo no existe o está inactivo, y rate limiting en memoria (`HTTP 429` tras 8 intentos fallidos en 300 s).
+- **Sesión JWT revocable (`GET /api/auth/me`, `POST /api/auth/logout`):** tokens HS256 de 15 minutos con `jti` persistido y validado en la tabla `sesiones` de PostgreSQL.
+- **Cambio de contraseña temporal (`POST /api/auth/change-password`):** bloquea las demás rutas hasta reemplazar contraseñas temporales (`TEMPORARY$`) e invalida sesiones previas.
+- **Eliminación de persistencia legada TXT:** eliminados `backend/data/*.txt` y repositorios de archivo (`ArchivoUsuarios`, `ArchivoProfesionales`); PostgreSQL es el único almacenamiento.
 
-- Administración de cuentas, roles y estado activo/inactivo.
-- Fichas profesionales: profesional completa y envía; administrador puede ver y editar los mismos campos, y aprobar o solicitar correcciones por separado.
-- Pacientes, antecedentes y asignaciones con historial.
-- Citas y seguimiento de ejercicios según permisos.
-- Tema claro/oscuro con preferencia local al navegador.
-- Asignaciones muestra resúmenes de estado, filtros, responsable e historial.
+### Usuarios, Profesionales, Roles y Permisos (`PB-03`, `PB-04`, `PB-26`)
+- **Usuarios y roles ([UsersPage.tsx](../../../frontend/presentation/pages/UsersPage.tsx)):** alta, edición, restablecimiento de contraseña, cambio de rol (`admin`/`professional`), activación/desactivación (con revocación inmediata de sesiones) y eliminación protegiendo al último administrador activo.
+- **Directorio y verificación profesional ([ProfessionalsPage.tsx](../../../frontend/presentation/pages/ProfessionalsPage.tsx), [ProfessionalProfilePage.tsx](../../../frontend/presentation/pages/ProfessionalProfilePage.tsx)):** autogestión de ficha por el profesional (`PENDIENTE`) y revisión administrativa (`VERIFICADA` / `REQUIERE_CAMBIOS`). Los profesionales sin ficha verificada no pueden operar rutas clínicas (`HTTP 403`).
+- **Matriz oficial de permisos ([permission-matrix-approved.csv](../../../backend/config/permission-matrix-approved.csv)):**
+  - `ADMINISTRADOR`: **26 permisos** permanentes de control total.
+  - `PROFESIONAL`: **12 permisos** clínicos configurables desde [AdminPermissionsPage.tsx](../../../frontend/presentation/pages/AdminPermissionsPage.tsx) (`GET /api/permisos/mis-permisos` para reflejo dinámico en UI).
 
-## Preparación y ejecución
+---
 
-1. Instala JDK 17, Maven, Node.js/npm y PostgreSQL.
-2. Configura en el proceso del backend `SENIOR_MANAGE_JDBC_URL`, `SENIOR_MANAGE_DB_USERNAME`, `SENIOR_MANAGE_DB_PASSWORD` y las variables JWT requeridas.
-3. Aplica V1–V5 según `backend/migrations/README.md`.
-4. Aplica/inicializa la matriz aprobada según `backend/README.md`.
-5. Inicia el backend y frontend con los comandos del README principal. Confirma estado con `/api/health`.
+## 2. Verificación del backend y frontend
 
-No se pudo compilar el backend en la última revisión de este entorno porque Maven no está instalado/disponible en PATH. `npm run typecheck` sí pasó; `npm run build` llegó a Vite y falló porque el sandbox denegó acceso a un directorio padre. No se ejecutaron pruebas ni se conectó a PostgreSQL en esta revisión.
+- `mvn -f backend/pom.xml -o test-compile`: **compilación correcta** (46 fuentes principales + 3 pruebas).
+- `mvn -f backend/pom.xml -o exec:java -Dexec.classpathScope=test -Dsenior.manage.mainClass=PruebaLogin`: **`PruebaLogin: 14 casos/verificaciones correctos.`**
+- `npm --prefix frontend run typecheck`: **pasó** sin errores TypeScript (`tsc --noEmit`).
 
-## Documentos relacionados
+---
 
-- Guía de arranque: `README.md`
-- Configuración backend: `backend/README.md`
-- API: `docs/api/README.md`
-- Arquitectura: `docs/architecture/ARCHITECTURE.md`
-- Requisitos: `docs/requirements/README.md`
-- Migraciones: `backend/migrations/README.md`
-- Sprints anteriores: `docs/sprints/`; sus revisiones reflejan el estado de la fecha indicada.
+## 3. Documentos relacionados
 
+- Índice consolidado de Sprints: [docs/sprints/README.md](../README.md)
+- Sprint 2: [docs/sprints/sprint-2/README.md](../sprint-2/README.md)
+- Sprint 3: [docs/sprints/sprint-3/README.md](../sprint-3/README.md)
+- Auditoría de seguridad y despliegue VPS/Docker: [REVISION_SEGURIDAD_Y_DESPLIEGUE_VERCEL.md](../../REVISION_SEGURIDAD_Y_DESPLIEGUE_VERCEL.md)

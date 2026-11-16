@@ -42,8 +42,10 @@ export {
     createExerciseFollowUp,
     listAllExerciseCatalog,
     createExerciseCatalogItem,
+    updateExerciseCatalogItem,
     listExerciseCatalog,
     listExercisePlans,
     assignExercisePlan,
+    updateExercisePlan,
 } from '../infrastructure/managementApi';
 export { ApiRequestError } from '../infrastructure/managementApi';

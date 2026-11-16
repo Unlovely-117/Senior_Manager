@@ -1,44 +1,65 @@
-﻿# Arquitectura de Senior-Manage
+# Arquitectura de Senior-Manage
 
-## Visión general
+## 1. Visión general
 
-Senior-Manage es una aplicación cliente-servidor para la coordinación de atención a adultos mayores. Los clientes son el administrador y los profesionales. La interfaz no se conecta directamente a PostgreSQL.
+Senior-Manage implementa una arquitectura **cliente-servidor por capas**, separando responsabilidades de dominio, casos de uso, infraestructura y presentación tanto en el backend Java 17 como en el frontend React + TypeScript.
 
 ```text
-Navegador (React + TypeScript + Vite)
-             │ HTTP / JSON bajo /api
-             ▼
-API Java 17 (HTTP, autorización, casos de uso)
-             │ JDBC + migraciones Flyway
-             ▼
-PostgreSQL (datos persistentes)
+Navegador (React 18 + TypeScript + Vite / Nginx)
+              │ HTTPS / Reverse Proxy (Caddy) -> /api
+              ▼
+API Java 17 (HttpServer, JWT, Autorización, Casos de uso)
+              │ JDBC + Migraciones Flyway (V1–V6)
+              ▼
+PostgreSQL 16 (Persistencia relacional)
 ```
 
-## Componentes y responsabilidades
+---
 
-- **Frontend (`frontend/`)**: presenta las pantallas, administra la sesión visible y consume la API. No contiene credenciales de base de datos.
-- **Presentación backend (`backend/src/presentation/`)**: rutas HTTP, validación de entrada, autenticación/autorización y respuestas JSON.
-- **Aplicación (`backend/src/application/`)**: casos de uso y coordinación de operaciones.
-- **Dominio (`backend/src/domain/`)**: entidades, contratos de repositorio y reglas independientes de HTTP/JDBC.
-- **Infraestructura (`backend/src/infrastructure/`)**: PostgreSQL/JDBC, JWT, migraciones, bootstrap y adaptadores técnicos.
-- **Migraciones (`backend/migrations/`)**: esquema versionado V1–V5. Flyway lo aplica de forma explícita; la API no cambia el esquema al arrancar.
+## 2. Capas del sistema
 
-Las dependencias de las capas externas apuntan hacia contratos y reglas internas. Los componentes visuales no ejecutan SQL y los casos de uso no dependen de React ni del protocolo HTTP.
+### Frontend (`frontend/`)
+- **`domain/models/`:** modelos e interfaces TypeScript (`management.ts`).
+- **`infrastructure/`:** cliente HTTP (`managementApi.ts`) sobre `fetch`, gestión de token JWT en `sessionStorage` y detección global de expiración (`401`).
+- **`application/`:** fachada de servicios de aplicación (`managementService.ts`) consumida por las páginas.
+- **`presentation/`:** enrutamiento por sesión/rol (`AppRouter.tsx`), componentes reutilizables (`BrandMark.tsx`) y vistas operativas por rol (`AdminDashboardPage`, `ProfessionalDashboardPage`, `UsersPage`, `ProfessionalsPage`, `ProfessionalProfilePage`, `ElderlyPage`, `AdminAssignmentsPage`, `AdminPermissionsPage`, `AdminAppointmentsPage`, `ExercisesPage`, `ChangePasswordPage`).
 
-## Persistencia
+### Backend (`backend/src/`)
+- **`domain/`:** entidades (`Usuario`, `Profesional`, `Paciente`, `Antecedente`, `AsignacionProfesionalPaciente`, `Permiso`, `Rol`, etc.) y puertos de repositorio independientes de JDBC/HTTP.
+- **`application/usecases/`:** reglas de negocio y casos de uso (`LoginService`, `AuthorizationService`, `GestionarUsuarios`, `GestionarUsuariosProfesionales`, `GestionarPermisos`, `GestionarPacientes`, `GestionarAntecedentes`, `GestionarAsignaciones`).
+- **`infrastructure/`:** repositorios JDBC sobre PostgreSQL (`PostgresRepositorio*`), configuración de base de datos y JWT (`EnvironmentDatabaseConfiguration`, `EnvironmentJwtConfiguration`, `JwtTokenService`), migrador (`ApplyMigrations`) y bootstrap (`PermissionBootstrap`, `ContainerBootstrap`).
+- **`presentation/`:** servidor HTTP embebido (`SeniorManageApiServer.java`), parseo/validación de entrada (`readForm`), cabeceras de seguridad, CORS y serialización JSON.
+- **`shared/security/`:** `PasswordHasher` con `PBKDF2WithHmacSHA256` (`210 000` iteraciones, tope de `128` caracteres, soporte de hashes temporales `TEMPORARY$`).
 
-PostgreSQL es el único almacenamiento activo del backend para cuentas, fichas profesionales, sesiones, permisos, pacientes, antecedentes, asignaciones, citas y seguimiento de ejercicios. La conexión se obtiene de `SENIOR_MANAGE_JDBC_URL`, `SENIOR_MANAGE_DB_USERNAME` y `SENIOR_MANAGE_DB_PASSWORD`. No se incluyen credenciales en el repositorio.
+---
 
-En una etapa temprana, usuarios y profesionales se guardaban en TXT. El sistema migró a PostgreSQL; los archivos de datos y sus repositorios TXT fueron retirados. La herramienta puntual de importación se retiró después de completar la migración. Los archivos físicos de PostgreSQL están en el servidor y su ubicación se consulta con `SHOW data_directory;`.
+## 3. Modelo de datos PostgreSQL (`V1–V6`)
 
-## Identidad y autorización
+| Migración | Tablas / Cambios clave |
+| :--- | :--- |
+| **V1** | `pacientes`, `antecedentes`, `permisos_rol`, `sesiones`, `permission_bootstrap_state`, `asignaciones_profesional_paciente`. |
+| **V2** | `usuarios`, `profesionales` (vínculo `usuario_id`), FK `asignaciones_profesional_paciente.profesional_id`, `legacy_text_import`. |
+| **V3** | `citas`, `seguimientos_medicamentos`. |
+| **V4** | `seguimientos_ejercicios`. |
+| **V5** | Columnas de credencial y flujo de verificación administrativa en `profesionales` (`estado_verificacion`, `nota_revision`, `verificado_por`, `verificado_en`). |
+| **V6** | `catalogo_ejercicios` (con `restricciones_clinicas TEXT[]` y 41 ejercicios semilla), `planes_ejercicios` (`frecuencia`, `series`, `repeticiones`, `duracion_minutos`, `indicaciones`, `activo`) y columna opcional `ejercicio_catalogo_id` en `seguimientos_ejercicios`. |
 
-La API valida la sesión y el permiso de módulo/acción. El rol en sí no concede acceso implícito a cada endpoint: los permisos efectivos se administran en PostgreSQL mediante la matriz aprobada. El acceso profesional a pacientes, antecedentes, citas y ejercicios se limita por asignación activa en el servidor.
+---
 
-Los profesionales completan su ficha; el envío la marca pendiente. Un administrador puede corregir o completar los mismos datos y debe usar la acción de revisión para verificarla o solicitar cambios.
+## 4. Seguridad, identidad y autorización
 
-## Ejecución local
+1. **Autenticación y mitigación de abuso:** `/api/auth/login` valida credenciales con hash constante incluso para correos inexistentes/inactivos (`DUMMY_HASH`), limita a 8 intentos fallidos cada 300 segundos (HTTP `429`) y exige cambio inmediato si el hash es temporal (`TEMPORARY$`).
+2. **Sesiones revocables:** Cada JWT HS256 (15 minutos) incluye un `jti` persistido en la tabla `sesiones` y verificado en cada petición protegida (`requireSession`).
+3. **Política `default-deny`:** `AuthorizationService` deniega toda acción no autorizada explícitamente. El `ADMINISTRADOR` mantiene sus 26 permisos fijos y el `PROFESIONAL` depende de los 12 permisos clínicos configurables en `permisos_rol`.
+4. **Aislamiento clínico:** Las cuentas con rol `PROFESIONAL` solo acceden a pacientes, antecedentes, citas, alertas del catálogo y rutinas cuando su ficha está `VERIFICADA` y existe una asignación vigente (`ACTIVA`, `fecha_fin IS NULL`) con el paciente.
+5. **Integridad de despliegue:** `ContainerBootstrap` y `PermissionBootstrap` validan el SHA-256 de `backend/config/permission-matrix-approved.csv` (`17FCA67F245F12A08A8EA7B05CF5ACB8E2EE24CB1B50EF636735DB222FFE11B4`) antes de inicializar o reconciliar permisos.
 
-Requisitos: JDK 17, Maven, Node.js/npm y PostgreSQL. Los comandos de migración, inicialización de permisos y ejecución se encuentran en `backend/README.md`. En desarrollo, Vite envía `/api` a `http://127.0.0.1:8080`.
+---
 
-El selector de tema claro/oscuro está en la cabecera de la interfaz. La selección se guarda en el almacenamiento local del navegador y no modifica datos de la cuenta.
+## 5. Arquitectura de despliegue (Docker Compose + Caddy)
+
+Definida en [docker-compose.yml](../../docker-compose.yml):
+- **`caddy` (`caddy:2-alpine`):** termina HTTP/HTTPS (`HTTP_PORT` / `HTTPS_PORT`) usando [Caddyfile](../../Caddyfile) con compresión `gzip`/`zstd` y reenvío a `frontend:80`.
+- **`frontend` (Nginx):** sirve los estáticos compilados de Vite y hace proxy de `/api` hacia `http://backend:8080`.
+- **`backend` (Temurin JRE 17):** usuario no privilegiado `appuser`; ejecuta `ContainerBootstrap` (espera DB → aplica Flyway `V1–V6` → asegura admin inicial → reconcilia matriz aprobada) e inicia `SeniorManageApiServer`.
+- **`db` (`postgres:16-alpine`):** volumen persistente `postgres_data` accesible únicamente en la red interna de Docker.

@@ -257,7 +257,7 @@ export function updatePatientHistory(id: string, values: Omit<PatientHistory, 'i
 
 export interface ClinicalRecord { id: string; patientId: string; patientName: string; professionalId?: string; professionalName?: string; date: string; item: string; notes: string; }
 export interface ExerciseCatalogItem { id: string; name: string; category: string; description: string; blocked: boolean; alerts: string[]; }
-export interface ExercisePlan { id: string; patientId: string; patientName: string; exerciseId: string; exerciseName: string; category: string; frequency: string; sets: number | null; repetitions: number | null; durationMinutes: number | null; notes: string; date: string; }
+export interface ExercisePlan { id: string; patientId: string; patientName: string; exerciseId: string; exerciseName: string; category: string; frequency: string; sets: number | null; repetitions: number | null; durationMinutes: number | null; notes: string; date: string; active: boolean; }
 export function listAppointments(): Promise<ClinicalRecord[]> { return request('/citas'); }
 export function createAppointment(values: { patientId: string; professionalId?: string; date: string; item: string }): Promise<ApiMessage> {
     return request('/citas', { method: 'POST', values });
@@ -280,12 +280,33 @@ export function createExerciseCatalogItem(values: {
 }): Promise<ApiMessage> {
     return request('/ejercicios/catalogo', { method: 'POST', values });
 }
+export function updateExerciseCatalogItem(id: string, values: {
+    name: string;
+    category: string;
+    description: string;
+    restrictions: string;
+}): Promise<ApiMessage> {
+    return request(`/ejercicios/catalogo/${encodeURIComponent(id)}`, { method: 'PUT', values });
+}
 export function listExerciseCatalog(patientId: string): Promise<ExerciseCatalogItem[]> {
     return request(`/ejercicios/catalogo/${encodeURIComponent(patientId)}`);
 }
 export function listExercisePlans(): Promise<ExercisePlan[]> { return request('/ejercicios/planes'); }
 export function assignExercisePlan(values: { patientId: string; exerciseId: string; frequency: string; sets: string; repetitions: string; durationMinutes: string; notes: string }): Promise<ApiMessage> {
     return request('/ejercicios/planes', { method: 'POST', values });
+}
+export function updateExercisePlan(
+    id: string,
+    values: { frequency?: string; sets?: string; repetitions?: string; durationMinutes?: string; notes?: string; active?: boolean },
+): Promise<ApiMessage> {
+    const payload: Record<string, string | boolean> = {};
+    if (values.frequency !== undefined) payload.frequency = values.frequency;
+    if (values.sets !== undefined) payload.sets = values.sets;
+    if (values.repetitions !== undefined) payload.repetitions = values.repetitions;
+    if (values.durationMinutes !== undefined) payload.durationMinutes = values.durationMinutes;
+    if (values.notes !== undefined) payload.notes = values.notes;
+    if (values.active !== undefined) payload.active = values.active;
+    return request(`/ejercicios/planes/${encodeURIComponent(id)}`, { method: 'PUT', values: payload });
 }
 
 function patientForm(values: Omit<Patient, 'id' | 'active'>): Record<string, string> {

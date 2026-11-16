@@ -1,5 +1,5 @@
-﻿# Diagramas de base de datos
+# Diagramas de base de datos
 
-El esquema PostgreSQL vigente se define en `backend/migrations/V1__sprint1_patients_permissions.sql` a `V5__professional_profiles_and_verification.sql`. Revisa esas migraciones para confirmar tablas, claves e índices antes de modificar diagramas.
+El esquema PostgreSQL vigente se define en las migraciones Flyway desde [V1__sprint1_patients_permissions.sql](../../backend/migrations/V1__sprint1_patients_permissions.sql) hasta [V6__exercise_catalog_and_clinical_alerts.sql](../../backend/migrations/V6__exercise_catalog_and_clinical_alerts.sql). Revisa esas migraciones antes de actualizar o generar diagramas ER.
 
-Los datos se guardan en el servidor PostgreSQL configurado por `SENIOR_MANAGE_JDBC_URL`; el repositorio contiene migraciones, no el directorio de datos de PostgreSQL.
+Los datos residen únicamente en el servidor PostgreSQL configurado mediante `SENIOR_MANAGE_JDBC_URL`; el repositorio versiona migraciones SQL, no archivos de datos.
