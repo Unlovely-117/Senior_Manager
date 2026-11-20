@@ -207,14 +207,20 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
 
     const submitCatalogExercise = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
-        setSavingCatalog(true);
         setError('');
         setNotice('');
+        const name = catalogDraft.name.trim();
+        const description = catalogDraft.description.trim();
+        if (!name || !catalogDraft.category.trim() || !description) {
+            setError('Completa todos los campos obligatorios (*) del ejercicio del catálogo.');
+            return;
+        }
+        setSavingCatalog(true);
         try {
             const payload = {
-                name: catalogDraft.name.trim(),
+                name,
                 category: catalogDraft.category,
-                description: catalogDraft.description.trim(),
+                description,
                 restrictions: catalogDraft.restrictions.trim(),
             };
             const result = editingCatalogId
@@ -255,11 +261,15 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
 
     const submitPlan = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
+        setError('');
+        setNotice('');
+        if (!patientId || (!editingPlanId && !exerciseId) || !planDraft.frequency.trim()) {
+            setError('Completa todos los campos obligatorios (*) para guardar el ejercicio en la rutina.');
+            return;
+        }
         if (!editingPlanId && (!selectedExercise || selectedExercise.blocked)) return;
         if (editingPlanId && selectedExercise?.blocked) return;
         setSavingPlan(true);
-        setError('');
-        setNotice('');
         try {
             if (editingPlanId) {
                 await updateExercisePlan(editingPlanId, {
@@ -360,7 +370,7 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
             {notice && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">{notice}</p>}
 
             {!readOnly && (
-                <form ref={catalogFormRef} onSubmit={(event) => void submitCatalogExercise(event)} className="space-y-5 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm sm:p-7">
+                <form noValidate ref={catalogFormRef} onSubmit={(event) => void submitCatalogExercise(event)} className="space-y-5 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm sm:p-7">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                             <h2 className="text-lg font-bold text-slate-900">
@@ -368,8 +378,8 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
                             </h2>
                             <p className="mt-1 text-sm text-slate-500">
                                 {editingCatalogId
-                                    ? 'Actualiza el nombre, categoría, guía técnica o alertas clínicas de este ejercicio.'
-                                    : 'Registra nuevos ejercicios reutilizables con su guía técnica y alertas clínicas opcionales.'}
+                                    ? 'Actualiza el nombre, categoría, guía técnica o alertas clínicas de este ejercicio. Los campos con * son obligatorios.'
+                                    : 'Registra nuevos ejercicios reutilizables con su guía técnica y alertas clínicas opcionales. Los campos con * son obligatorios.'}
                             </p>
                         </div>
                         {editingCatalogId && (
@@ -379,7 +389,7 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
                         )}
                     </div>
                     <div className="grid gap-4 sm:grid-cols-2">
-                        <label className="text-sm font-semibold text-slate-700">Nombre del ejercicio
+                        <label className="text-sm font-semibold text-slate-700">Nombre del ejercicio *
                             <input
                                 required
                                 maxLength={120}
@@ -389,7 +399,7 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
                                 className={inputClass}
                             />
                         </label>
-                        <label className="text-sm font-semibold text-slate-700">Categoría
+                        <label className="text-sm font-semibold text-slate-700">Categoría *
                             <select
                                 required
                                 value={catalogDraft.category}
@@ -400,7 +410,7 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
                             </select>
                         </label>
                     </div>
-                    <label className="block text-sm font-semibold text-slate-700">Descripción / guía técnica
+                    <label className="block text-sm font-semibold text-slate-700">Descripción / guía técnica *
                         <textarea
                             required
                             maxLength={500}
@@ -411,7 +421,7 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
                             className={inputClass}
                         />
                     </label>
-                    <label className="block text-sm font-semibold text-slate-700">Contraindicaciones / alertas clínicas opcionales (separadas por coma)
+                    <label className="block text-sm font-semibold text-slate-700">Contraindicaciones / alertas clínicas (opcional, separadas por coma)
                         <input
                             maxLength={1000}
                             value={catalogDraft.restrictions}
@@ -438,7 +448,7 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
             )}
 
             {!readOnly && (
-                <form ref={planFormRef} onSubmit={(event) => void submitPlan(event)} className="space-y-5 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm sm:p-7">
+                <form noValidate ref={planFormRef} onSubmit={(event) => void submitPlan(event)} className="space-y-5 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm sm:p-7">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                             <h2 className="text-lg font-bold text-slate-900">
@@ -446,8 +456,8 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
                             </h2>
                             <p className="mt-1 text-sm text-slate-500">
                                 {editingPlanId
-                                    ? 'Ajusta la frecuencia, carga, duración o indicaciones según la evolución del paciente.'
-                                    : 'Selecciona un adulto mayor para revisar sus antecedentes, filtrar por categoría y configurar cada ejercicio de su rutina.'}
+                                    ? 'Ajusta la frecuencia, carga, duración o indicaciones según la evolución del paciente. Los campos con * son obligatorios.'
+                                    : 'Selecciona un adulto mayor para revisar sus antecedentes, filtrar por categoría y configurar cada ejercicio de su rutina. Los campos con * son obligatorios.'}
                             </p>
                         </div>
                         {editingPlanId && (
@@ -458,7 +468,7 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
                     </div>
 
                     <div className="grid gap-4 sm:grid-cols-3">
-                        <label className="text-sm font-semibold text-slate-700">Paciente
+                        <label className="text-sm font-semibold text-slate-700">Paciente *
                             <select
                                 required
                                 value={patientId}
@@ -473,7 +483,7 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
                                 {patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.fullName}</option>)}
                             </select>
                         </label>
-                        <label className="text-sm font-semibold text-slate-700">Filtrar por categoría
+                        <label className="text-sm font-semibold text-slate-700">Filtrar por categoría (opcional)
                             <select
                                 value={planCategoryFilter}
                                 disabled={!patientId || Boolean(editingPlanId)}
@@ -487,7 +497,7 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
                                 {availableCategories.map((category) => <option key={category} value={category}>{category}</option>)}
                             </select>
                         </label>
-                        <label className="text-sm font-semibold text-slate-700">Ejercicio del catálogo
+                        <label className="text-sm font-semibold text-slate-700">Ejercicio del catálogo *
                             <select
                                 required
                                 value={exerciseId}
@@ -556,7 +566,7 @@ export const ExercisesPage: FC<Props> = ({ readOnly = false }) => {
                     )}
 
                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                        <label className="text-sm font-semibold text-slate-700">Frecuencia
+                        <label className="text-sm font-semibold text-slate-700">Frecuencia *
                             <input
                                 required
                                 name="frequency"

@@ -15,6 +15,14 @@ export const ChangePasswordPage: React.FC<ChangePasswordPageProps> = ({ name, on
     const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         setError('');
+        if (!password || !confirmation) {
+            setError('Completa los campos obligatorios (*): nueva contraseña y confirmación.');
+            return;
+        }
+        if (password.length < 8) {
+            setError('La contraseña debe tener al menos 8 caracteres.');
+            return;
+        }
         if (password !== confirmation) {
             setError('Las contraseñas no coinciden.');
             return;
@@ -41,10 +49,11 @@ export const ChangePasswordPage: React.FC<ChangePasswordPageProps> = ({ name, on
                     Para proteger tu cuenta, debes cambiar la contraseña temporal antes de continuar.
                 </p>
 
-                <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+                <form noValidate onSubmit={handleSubmit} className="mt-6 space-y-4">
+                    <p className="text-xs text-gray-500">Los campos marcados con * son obligatorios.</p>
                     {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">{error}</p>}
                     <label className="block space-y-1.5 text-sm font-semibold text-gray-700">
-                        Nueva contraseña
+                        Nueva contraseña *
                         <input
                             type="password"
                             required
@@ -57,7 +66,7 @@ export const ChangePasswordPage: React.FC<ChangePasswordPageProps> = ({ name, on
                         <span className="block text-xs font-normal text-gray-500">Usa al menos 8 caracteres.</span>
                     </label>
                     <label className="block space-y-1.5 text-sm font-semibold text-gray-700">
-                        Confirma la nueva contraseña
+                        Confirma la nueva contraseña *
                         <input
                             type="password"
                             required

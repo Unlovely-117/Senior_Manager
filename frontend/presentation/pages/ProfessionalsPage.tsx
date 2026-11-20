@@ -9,7 +9,11 @@ import {
     setProfessionalStatus,
     updateProfessional,
 } from '../../application/managementService';
-import type { Professional } from '../../domain/models/management';
+import {
+    PROFESSIONAL_SPECIALTIES,
+    isValidProfessionalSpecialty,
+    type Professional,
+} from '../../domain/models/management';
 
 type ProfessionalForm = {
     name: string;
@@ -125,26 +129,58 @@ export const ProfessionalsPage: FC = () => {
 
     const saveProfessional = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
-        setIsSaving(true);
         setFormError('');
         setRequestError('');
+
+        const name = draft.name.trim();
+        const document = draft.document.trim();
+        const email = draft.email.trim();
+        const phone = draft.phone.trim();
+        const specialty = draft.specialty.trim();
+        const licenseNumber = draft.licenseNumber.trim();
+        const education = draft.education.trim();
+
+        if (
+            (editingDocument === null && !selectedAccountEmail)
+            || (editingDocument !== null && (!name || !email))
+            || !document
+            || !phone
+            || !specialty
+            || !licenseNumber
+            || !education
+        ) {
+            setFormError('Completa todos los campos obligatorios (*) antes de guardar la ficha.');
+            return;
+        }
+        if (!isValidProfessionalSpecialty(specialty)) {
+            setFormError('Selecciona una profesión o especialidad válida (no puede contener números).');
+            return;
+        }
+
+        setIsSaving(true);
         try {
             if (editingDocument === null) {
                 await createProfessional({
-                    document: draft.document.trim(),
+                    document,
                     email: selectedAccountEmail,
-                    phone: draft.phone.trim(),
-                    specialty: draft.specialty.trim(), licenseNumber: draft.licenseNumber.trim(), education: draft.education.trim(),
-                    experience: draft.experience.trim(), biography: draft.biography.trim(),
+                    phone,
+                    specialty,
+                    licenseNumber,
+                    education,
+                    experience: draft.experience.trim(),
+                    biography: draft.biography.trim(),
                 });
                 setNotice('Ficha profesional creada y vinculada a la cuenta.');
             } else {
                 await updateProfessional(editingDocument, {
-                    name: draft.name.trim(),
-                    email: draft.email.trim(),
-                    phone: draft.phone.trim(),
-                    specialty: draft.specialty.trim(), licenseNumber: draft.licenseNumber.trim(), education: draft.education.trim(),
-                    experience: draft.experience.trim(), biography: draft.biography.trim(),
+                    name,
+                    email,
+                    phone,
+                    specialty,
+                    licenseNumber,
+                    education,
+                    experience: draft.experience.trim(),
+                    biography: draft.biography.trim(),
                 });
                 setNotice('Datos de la ficha profesional actualizados.');
             }
@@ -301,11 +337,12 @@ export const ProfessionalsPage: FC = () => {
             )}
 
             {isFormOpen && (
-                <form onSubmit={saveProfessional} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-6">
+                <form noValidate onSubmit={saveProfessional} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-6">
                     <div className="mb-5 flex items-center justify-between">
                         <div>
                             <p className="text-xs font-bold uppercase tracking-wider text-[#0d7377]">Directorio</p>
                             <h2 className="mt-1 text-lg font-bold text-[#102a36]">{editingDocument === null ? 'Completar ficha profesional' : 'Editar ficha profesional'}</h2>
+                            <p className="mt-1 text-xs text-gray-500">Los campos marcados con * son obligatorios.</p>
                         </div>
                         <button type="button" onClick={() => setIsFormOpen(false)} className="rounded-lg px-3 py-2 text-sm text-gray-500 hover:bg-gray-100">Cancelar</button>
                     </div>
@@ -313,7 +350,7 @@ export const ProfessionalsPage: FC = () => {
                     {editingDocument === null ? (
                         <div className="mb-4">
                             <label className="space-y-1.5 text-xs font-semibold text-gray-600">
-                                Cuenta profesional
+                                Cuenta profesional *
                                 <select
                                     required
                                     className={inputClass}
@@ -337,32 +374,45 @@ export const ProfessionalsPage: FC = () => {
                         </div>
                     ) : null}
                     <div className="grid gap-4 sm:grid-cols-2">
-                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Nombre de la cuenta
+                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Nombre de la cuenta{editingDocument !== null && !linkedProfiles.some((professional) => professional.document === editingDocument) ? ' *' : ''}
                             <input required maxLength={100} readOnly={editingDocument === null || linkedProfiles.some((professional) => professional.document === editingDocument)} className={`${inputClass} read-only:cursor-not-allowed read-only:opacity-70`} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
                         </label>
-                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Documento
+                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Documento *
                             <input required maxLength={40} disabled={editingDocument !== null} className={`${inputClass} disabled:cursor-not-allowed disabled:opacity-60`} value={draft.document} onChange={(event) => setDraft({ ...draft, document: event.target.value })} />
                         </label>
                         <label className="space-y-1.5 text-xs font-semibold text-gray-600">Correo de la cuenta
                             <input type="text" maxLength={120} readOnly className={`${inputClass} read-only:cursor-not-allowed read-only:opacity-70`} value={draft.email} />
                         </label>
-                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Teléfono
+                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Teléfono *
                             <input required type="tel" maxLength={40} className={inputClass} value={draft.phone} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} />
                         </label>
-                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Profesión o especialidad
-                            <input required maxLength={120} className={inputClass} value={draft.specialty} onChange={(event) => setDraft({ ...draft, specialty: event.target.value })} placeholder="Ej.: Fisioterapia geriátrica" />
+                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Profesión o especialidad *
+                            <select
+                                required
+                                className={inputClass}
+                                value={isValidProfessionalSpecialty(draft.specialty) ? draft.specialty : ''}
+                                onChange={(event) => setDraft({ ...draft, specialty: event.target.value })}
+                            >
+                                <option value="">Selecciona una profesión o especialidad</option>
+                                {draft.specialty && isValidProfessionalSpecialty(draft.specialty) && !PROFESSIONAL_SPECIALTIES.includes(draft.specialty) && (
+                                    <option value={draft.specialty}>{draft.specialty}</option>
+                                )}
+                                {PROFESSIONAL_SPECIALTIES.map((specialty) => (
+                                    <option key={specialty} value={specialty}>{specialty}</option>
+                                ))}
+                            </select>
                         </label>
-                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Tarjeta o registro profesional
+                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Tarjeta o registro profesional *
                             <input required maxLength={100} className={inputClass} value={draft.licenseNumber} onChange={(event) => setDraft({ ...draft, licenseNumber: event.target.value })} />
                         </label>
                     </div>
-                    <label className="mt-4 block space-y-1.5 text-xs font-semibold text-gray-600">Formación académica
+                    <label className="mt-4 block space-y-1.5 text-xs font-semibold text-gray-600">Formación académica *
                         <textarea required maxLength={300} rows={2} className={inputClass} value={draft.education} onChange={(event) => setDraft({ ...draft, education: event.target.value })} placeholder="Títulos, institución y año" />
                     </label>
-                    <label className="mt-4 block space-y-1.5 text-xs font-semibold text-gray-600">Experiencia relevante
+                    <label className="mt-4 block space-y-1.5 text-xs font-semibold text-gray-600">Experiencia relevante (opcional)
                         <textarea maxLength={2000} rows={3} className={inputClass} value={draft.experience} onChange={(event) => setDraft({ ...draft, experience: event.target.value })} />
                     </label>
-                    <label className="mt-4 block space-y-1.5 text-xs font-semibold text-gray-600">Presentación profesional
+                    <label className="mt-4 block space-y-1.5 text-xs font-semibold text-gray-600">Presentación profesional (opcional)
                         <textarea maxLength={2000} rows={3} className={inputClass} value={draft.biography} onChange={(event) => setDraft({ ...draft, biography: event.target.value })} />
                     </label>
                     <p className="mt-3 text-xs text-gray-500">La cuenta y el rol se administran en Usuarios y roles. Esta ficha guarda únicamente los datos profesionales complementarios.</p>

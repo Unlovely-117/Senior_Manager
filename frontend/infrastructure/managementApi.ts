@@ -100,6 +100,47 @@ export async function signOut(): Promise<void> {
     }
 }
 
+let inFlightRefresh: Promise<AuthenticatedUser | null> | null = null;
+
+export function getTokenWindow(): { remainingMs: number; lifetimeMs: number } | null {
+    const token = sessionStorage.getItem(TOKEN_KEY);
+    if (!token) return null;
+    const parts = token.split('.');
+    const payloadSegment = parts[1];
+    if (parts.length !== 3 || !payloadSegment) return null;
+    try {
+        const base64 = payloadSegment.replace(/-/g, '+').replace(/_/g, '/');
+        const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+        const payload = JSON.parse(atob(padded)) as { exp?: unknown; iat?: unknown };
+        if (typeof payload.exp !== 'number') return null;
+        const expMs = payload.exp * 1000;
+        const iatMs = typeof payload.iat === 'number' ? payload.iat * 1000 : expMs - 60 * 60 * 1000;
+        return {
+            remainingMs: expMs - Date.now(),
+            lifetimeMs: Math.max(expMs - iatMs, 60_000),
+        };
+    } catch {
+        return null;
+    }
+}
+
+export async function refreshSession(): Promise<AuthenticatedUser | null> {
+    if (!sessionStorage.getItem(TOKEN_KEY)) {
+        return null;
+    }
+    if (!inFlightRefresh) {
+        inFlightRefresh = request<AuthenticatedUser>('/auth/refresh', { method: 'POST' })
+            .then((user) => {
+                sessionStorage.setItem(TOKEN_KEY, user.token);
+                return user;
+            })
+            .finally(() => {
+                inFlightRefresh = null;
+            });
+    }
+    return inFlightRefresh;
+}
+
 export async function changePassword(password: string, confirmation: string): Promise<void> {
     await request<ApiMessage>('/auth/change-password', {
         method: 'POST',
@@ -243,7 +284,10 @@ export function updatePatient(id: string, values: Omit<Patient, 'id' | 'active'>
     return request(`/pacientes/${encodeURIComponent(id)}`, { method: 'PUT', values: patientForm(values) });
 }
 export async function deactivatePatient(id: string): Promise<void> {
-    await request<ApiMessage>(`/pacientes/${encodeURIComponent(id)}/estado`, { method: 'PATCH', values: {} });
+    await request<ApiMessage>(`/pacientes/${encodeURIComponent(id)}/estado`, { method: 'PATCH', values: { active: false } });
+}
+export async function reactivatePatient(id: string): Promise<void> {
+    await request<ApiMessage>(`/pacientes/${encodeURIComponent(id)}/estado`, { method: 'PATCH', values: { active: true } });
 }
 export function listPatientHistory(id: string): Promise<PatientHistory[]> {
     return request(`/pacientes/${encodeURIComponent(id)}/antecedentes`);
@@ -255,7 +299,7 @@ export function updatePatientHistory(id: string, values: Omit<PatientHistory, 'i
     return request(`/antecedentes/${encodeURIComponent(id)}`, { method: 'PUT', values });
 }
 
-export interface ClinicalRecord { id: string; patientId: string; patientName: string; professionalId?: string; professionalName?: string; date: string; item: string; notes: string; }
+export interface ClinicalRecord { id: string; patientId: string; patientName: string; professionalId?: string; professionalName?: string; date: string; item: string; notes: string; patientActive?: boolean; }
 export interface ExerciseCatalogItem { id: string; name: string; category: string; description: string; blocked: boolean; alerts: string[]; }
 export interface ExercisePlan { id: string; patientId: string; patientName: string; exerciseId: string; exerciseName: string; category: string; frequency: string; sets: number | null; repetitions: number | null; durationMinutes: number | null; notes: string; date: string; active: boolean; }
 export function listAppointments(): Promise<ClinicalRecord[]> { return request('/citas'); }

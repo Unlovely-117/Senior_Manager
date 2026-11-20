@@ -1,0 +1,4 @@
+-- Allow EN_PROGRESO state alongside PROGRAMADA, COMPLETADA and CANCELADA in citas.
+ALTER TABLE citas DROP CONSTRAINT IF EXISTS citas_estado_check;
+ALTER TABLE citas ADD CONSTRAINT citas_estado_check
+    CHECK (estado IN ('PROGRAMADA', 'EN_PROGRESO', 'COMPLETADA', 'CANCELADA'));

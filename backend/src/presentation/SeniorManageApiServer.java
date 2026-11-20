@@ -133,6 +133,7 @@ public final class SeniorManageApiServer {
         if (databaseIssue != null) {
             throw new IllegalStateException(databaseIssue);
         }
+        application.ensureAppointmentStatesConstraint();
         HttpServer server = HttpServer.create(
             new InetSocketAddress(InetAddress.getByName(bindAddress), port),
             0
@@ -226,6 +227,10 @@ public final class SeniorManageApiServer {
                 }
                 if ("POST".equals(method) && "/api/auth/change-password".equals(path)) {
                     changePassword(exchange, session);
+                    return;
+                }
+                if ("POST".equals(method) && "/api/auth/refresh".equals(path)) {
+                    refreshSession(exchange, session);
                     return;
                 }
                 if ("POST".equals(method) && "/api/auth/logout".equals(path)) {
@@ -370,6 +375,45 @@ public final class SeniorManageApiServer {
             + "}");
     }
 
+    private void refreshSession(HttpExchange exchange, Session session) throws IOException {
+        Usuario user = users.buscarUsuarioPorCorreo(session.email);
+        if (user == null || !user.isActivo()) {
+            sendError(exchange, 401, "La cuenta ya no está activa.");
+            return;
+        }
+        UUID newTokenId = UUID.randomUUID();
+        String newToken = jwtTokens.issue(user.getCorreo(), user.getRol().name(), newTokenId.toString());
+        sessionRepository.registrar(newTokenId, user.getCorreo(), Instant.now().plus(jwtConfiguration.getTokenLifetime()));
+        shortenSupersededSessionExpiry(session.tokenId, Instant.now().plusSeconds(30));
+        sendJson(exchange, 200,
+            "{\"token\":" + json(newToken)
+            + ",\"email\":" + json(user.getCorreo())
+            + ",\"name\":" + json(user.getNombre())
+            + ",\"role\":" + json(roleForClient(user.getRol()))
+            + ",\"mustChangePassword\":" + passwordHasher.esHashTemporal(user.getPasswordHash())
+            + "}");
+    }
+
+    private void shortenSupersededSessionExpiry(UUID tokenId, Instant graceDeadline) {
+        String sql = "UPDATE sesiones SET expira_en = LEAST(expira_en, ?) WHERE jti = ? AND revocada_en IS NULL";
+        try (Connection c = jdbcConnections.open(); PreparedStatement s = c.prepareStatement(sql)) {
+            s.setTimestamp(1, java.sql.Timestamp.from(graceDeadline));
+            s.setObject(2, tokenId);
+            s.executeUpdate();
+        } catch (SQLException ignored) {
+            // Best-effort grace window; the new session is already active.
+        }
+    }
+
+    private void ensureAppointmentStatesConstraint() {
+        try (Connection c = jdbcConnections.open(); java.sql.Statement st = c.createStatement()) {
+            st.execute("ALTER TABLE citas DROP CONSTRAINT IF EXISTS citas_estado_check");
+            st.execute("ALTER TABLE citas ADD CONSTRAINT citas_estado_check CHECK (estado IN ('PROGRAMADA', 'EN_PROGRESO', 'COMPLETADA', 'CANCELADA'))");
+        } catch (SQLException ignored) {
+            // If DB user lacks DDL privileges, Flyway V7 migration manages the constraint.
+        }
+    }
+
     private static String clientIp(HttpExchange exchange) {
         String forwarded = exchange.getRequestHeaders().getFirst("X-Forwarded-For");
         if (forwarded != null && !forwarded.isBlank()) {
@@ -482,7 +526,7 @@ public final class SeniorManageApiServer {
         Map<String, String> form = readForm(exchange);
         String document = boundedText(form, "document", 40, true);
         String phone = boundedText(form, "phone", 40, true);
-        String specialty = boundedText(form, "specialty", 120, true);
+        String specialty = validateSpecialty(form, "specialty");
         String license = boundedText(form, "licenseNumber", 100, true);
         String education = boundedText(form, "education", 300, true);
         String experience = boundedText(form, "experience", 2000, false);
@@ -510,6 +554,15 @@ public final class SeniorManageApiServer {
             throw new IllegalArgumentException(required
                 ? "El campo " + key + " es obligatorio y no puede superar " + maxLength + " caracteres."
                 : "El campo " + key + " no puede superar " + maxLength + " caracteres.");
+        }
+        return value;
+    }
+
+    private String validateSpecialty(Map<String, String> form, String key) {
+        String value = boundedText(form, key, 120, true);
+        if (value.length() < 3 || !value.matches(".*\\p{L}.*") || !value.matches("^[\\p{L} ,.-]+$")) {
+            throw new IllegalArgumentException(
+                "La profesión o especialidad debe tener al menos 3 letras y no puede contener números ni caracteres especiales.");
         }
         return value;
     }
@@ -559,7 +612,7 @@ public final class SeniorManageApiServer {
             }
             Profesional profile = new Profesional(account.getNombre(), document, account.getCorreo(), phone);
             profile.setFichaProfesional(
-                boundedText(form, "specialty", 120, true), boundedText(form, "licenseNumber", 100, true),
+                validateSpecialty(form, "specialty"), boundedText(form, "licenseNumber", 100, true),
                 boundedText(form, "education", 300, true), boundedText(form, "experience", 2000, false),
                 boundedText(form, "biography", 2000, false), "SIN_PRESENTAR", null);
             profile.setActivo(account.isActivo());
@@ -614,7 +667,7 @@ public final class SeniorManageApiServer {
                 existing.setCorreo(email);
                 existing.setTelefono(phone);
                 existing.setFichaProfesional(
-                    boundedText(form, "specialty", 120, true), boundedText(form, "licenseNumber", 100, true),
+                    validateSpecialty(form, "specialty"), boundedText(form, "licenseNumber", 100, true),
                     boundedText(form, "education", 300, true), boundedText(form, "experience", 2000, false),
                     boundedText(form, "biography", 2000, false), existing.getEstadoVerificacion(), existing.getNotaRevision());
                 if (professionalRepository.actualizar(existing)) {
@@ -1049,7 +1102,7 @@ public final class SeniorManageApiServer {
         if (!appointments && "DELETE".equals(operation)) { sendError(exchange, 405, "No se permite eliminar seguimientos clínicos."); return; }
         if ("GET".equals(method) && segments.length == 1) {
             String sql = appointments
-                ? "SELECT c.id,c.paciente_id,p.nombre_completo,c.profesional_id,pr.nombre,c.fecha_hora,c.motivo,c.estado FROM citas c JOIN pacientes p ON p.id=c.paciente_id JOIN profesionales pr ON pr.id=c.profesional_id "
+                ? "SELECT c.id,c.paciente_id,p.nombre_completo,c.profesional_id,pr.nombre,c.fecha_hora,c.motivo,c.estado,p.activo FROM citas c JOIN pacientes p ON p.id=c.paciente_id JOIN profesionales pr ON pr.id=c.profesional_id "
                 : "SELECT m.id,m.paciente_id,p.nombre_completo,NULL::uuid,NULL::text,m.registrado_en,m.ejercicio,m.notas FROM seguimientos_ejercicios m JOIN pacientes p ON p.id=m.paciente_id ";
             if (session.role == Rol.PROFESIONAL) sql += appointments
                 ? "JOIN usuarios u ON u.correo_normalizado=lower(trim(?)) AND u.id=pr.usuario_id WHERE pr.activo AND u.activo AND EXISTS (SELECT 1 FROM asignaciones_profesional_paciente a WHERE a.paciente_id=c.paciente_id AND a.profesional_id=pr.id AND a.estado='ACTIVA' AND a.fecha_fin IS NULL) "
@@ -1065,7 +1118,9 @@ public final class SeniorManageApiServer {
                             .append(",\"patientName\":").append(json(rows.getString(3)));
                         if (appointments) out.append(",\"professionalId\":").append(json(rows.getString(4))).append(",\"professionalName\":").append(json(rows.getString(5)));
                         out.append(",\"date\":").append(json(rows.getString(6))).append(",\"item\":").append(json(rows.getString(7)))
-                            .append(",\"notes\":").append(json(rows.getString(8))).append('}');
+                            .append(",\"notes\":").append(json(rows.getString(8)));
+                        if (appointments) out.append(",\"patientActive\":").append(rows.getBoolean(9));
+                        out.append('}');
                     }
                     sendJson(exchange, 200, out.append(']').toString());
                 }
@@ -1116,6 +1171,7 @@ public final class SeniorManageApiServer {
             if (appointments && session.role == Rol.PROFESIONAL) professionalId = professionalIdFor(session.email);
             if (session.role == Rol.PROFESIONAL && !currentlyAssigned(session.email, patientId)) { sendError(exchange,403,"El paciente no está asignado actualmente a tu cuenta."); return; }
             if (appointments) {
+                if (!activePatient(patientId)) { sendError(exchange,409,"No se pueden agendar citas para un paciente inactivo."); return; }
                 if (professionalId == null || professionalId.isBlank()) { sendError(exchange,400,"Selecciona un profesional."); return; }
                 if (session.role == Rol.ADMINISTRADOR && !isActiveAssignment(patientId, UUID.fromString(professionalId))) { sendError(exchange,400,"La cita requiere un paciente activo asignado a un profesional activo."); return; }
                 String sql="INSERT INTO citas(id,paciente_id,profesional_id,fecha_hora,motivo,creado_por) VALUES(?,?,?,?::timestamptz,?,?) RETURNING id";
@@ -1130,9 +1186,54 @@ public final class SeniorManageApiServer {
         }
         if (segments.length == 2 && ("PUT".equals(method) || (appointments && "DELETE".equals(method)))) {
             UUID id=UUID.fromString(segments[1]); Map<String,String> form="DELETE".equals(method)?Map.of("status","CANCELADA"):readForm(exchange);
-            if(appointments){String sql="UPDATE citas c SET fecha_hora=COALESCE(?::timestamptz,c.fecha_hora), motivo=COALESCE(?,c.motivo), estado=COALESCE(?,c.estado) WHERE c.id=? AND (?='ADMINISTRADOR' OR EXISTS(SELECT 1 FROM asignaciones_profesional_paciente a JOIN profesionales pr ON pr.id=a.profesional_id JOIN usuarios u ON u.id=pr.usuario_id WHERE a.paciente_id=c.paciente_id AND a.profesional_id=c.profesional_id AND pr.activo AND u.activo AND lower(trim(u.correo))=lower(trim(?)) AND a.estado='ACTIVA' AND a.fecha_fin IS NULL))";
-                if (form.containsKey("status") && !Set.of("PROGRAMADA", "COMPLETADA", "CANCELADA").contains(form.get("status"))) { sendError(exchange,400,"Estado de cita no válido."); return; }
-                try(Connection c=jdbcConnections.open();PreparedStatement q=c.prepareStatement(sql)){q.setString(1,form.get("date"));q.setString(2,form.get("item"));q.setString(3,form.get("status"));q.setObject(4,id);q.setString(5,session.role.name());q.setString(6,session.email);if(q.executeUpdate()==0){sendError(exchange,404,"Cita inexistente o fuera de tu asignación activa.");return;}sendMessage(exchange,200,"Cita actualizada.");}catch(SQLException e){throw new PersistenceException("No se pudo actualizar la cita.",e);}
+            if(appointments){
+                String requestedStatus = form.get("status");
+                if (requestedStatus != null && !Set.of("PROGRAMADA", "EN_PROGRESO", "COMPLETADA", "CANCELADA").contains(requestedStatus)) {
+                    sendError(exchange, 400, "Estado de cita no válido.");
+                    return;
+                }
+                String checkSql = "SELECT c.estado, p.activo FROM citas c JOIN pacientes p ON p.id = c.paciente_id "
+                    + "WHERE c.id = ? AND (? = 'ADMINISTRADOR' OR EXISTS(SELECT 1 FROM asignaciones_profesional_paciente a JOIN profesionales pr ON pr.id=a.profesional_id JOIN usuarios u ON u.id=pr.usuario_id WHERE a.paciente_id=c.paciente_id AND a.profesional_id=c.profesional_id AND pr.activo AND u.activo AND lower(trim(u.correo))=lower(trim(?)) AND a.estado='ACTIVA' AND a.fecha_fin IS NULL))";
+                try (Connection c = jdbcConnections.open()) {
+                    String currentStatus;
+                    boolean patientActive;
+                    try (PreparedStatement check = c.prepareStatement(checkSql)) {
+                        check.setObject(1, id);
+                        check.setString(2, session.role.name());
+                        check.setString(3, session.email);
+                        try (ResultSet rs = check.executeQuery()) {
+                            if (!rs.next()) {
+                                sendError(exchange, 404, "Cita inexistente o fuera de tu asignación activa.");
+                                return;
+                            }
+                            currentStatus = rs.getString(1);
+                            patientActive = rs.getBoolean(2);
+                        }
+                    }
+                    if (!patientActive) {
+                        sendError(exchange, 409, "No se pueden completar ni modificar citas de un paciente inactivo.");
+                        return;
+                    }
+                    if (Set.of("COMPLETADA", "CANCELADA").contains(currentStatus)) {
+                        sendError(exchange, 409, "La cita ya fue finalizada y no admite cambios de estado.");
+                        return;
+                    }
+                    if ("EN_PROGRESO".equals(currentStatus) && "PROGRAMADA".equals(requestedStatus)) {
+                        sendError(exchange, 409, "Una cita en progreso no puede volver a estado programada.");
+                        return;
+                    }
+                    String updateSql = "UPDATE citas SET fecha_hora=COALESCE(?::timestamptz,fecha_hora), motivo=COALESCE(?,motivo), estado=COALESCE(?,estado) WHERE id=?";
+                    try (PreparedStatement q = c.prepareStatement(updateSql)) {
+                        q.setString(1, form.get("date"));
+                        q.setString(2, form.get("item"));
+                        q.setString(3, requestedStatus);
+                        q.setObject(4, id);
+                        q.executeUpdate();
+                        sendMessage(exchange, 200, "Cita actualizada.");
+                    }
+                } catch (SQLException e) {
+                    throw new PersistenceException("No se pudo actualizar la cita.", e);
+                }
             } else {sendError(exchange,405,"El seguimiento no admite modificación por esta ruta.");}
             return;
         }
@@ -1550,10 +1651,14 @@ public final class SeniorManageApiServer {
                 || (!patientRoot && segments.length == 2 && associatedPatient == null)) {
             sendError(exchange, 404, patientRoot ? "Paciente no encontrado." : "Antecedente no encontrado."); return;
         }
+        boolean statusPatchRequest = patientRoot && segments.length == 3 && "estado".equals(segments[2]) && "PATCH".equals(method);
         if (associatedPatient != null && !associatedPatient.isActivo()) {
-            if (!"GET".equals(method)) { sendError(exchange, 403, "Los pacientes inactivos son de solo lectura."); return; }
-            if (!authorization.isAllowed(session.role, "PACIENTES", "HISTORY_READ", permissionRepository)) {
-                sendError(exchange, 403, "La configuracion no autoriza la consulta historica."); return;
+            if ("GET".equals(method)) {
+                if (!authorization.isAllowed(session.role, "PACIENTES", "HISTORY_READ", permissionRepository)) {
+                    sendError(exchange, 403, "La configuracion no autoriza la consulta historica."); return;
+                }
+            } else if (!statusPatchRequest) {
+                sendError(exchange, 403, "Los pacientes inactivos son de solo lectura."); return;
             }
         }
         if (session.role == Rol.PROFESIONAL && associatedPatient != null
@@ -1596,9 +1701,18 @@ public final class SeniorManageApiServer {
                 } catch (DocumentoPacienteDuplicadoException duplicate) { sendError(exchange, 409, duplicate.getMessage()); }
                 catch (IllegalStateException invalid) { sendError(exchange, 409, invalid.getMessage()); }
             } else if (segments.length == 3 && "estado".equals(segments[2]) && "PATCH".equals(method)) {
-                boolean changed = patientManagement.desactivar(UUID.fromString(decode(segments[1])));
-                if (!changed) sendError(exchange, 404, "Paciente no encontrado o ya inactivo.");
-                else sendMessage(exchange, 200, "Paciente desactivado; sus antecedentes se conservan.");
+                Map<String, String> form = readForm(exchange);
+                boolean reactivate = form.containsKey("active") && parseBoolean(form.get("active"));
+                UUID targetPatientId = UUID.fromString(decode(segments[1]));
+                if (reactivate) {
+                    boolean changed = patientManagement.activar(targetPatientId);
+                    if (!changed) sendError(exchange, 404, "Paciente no encontrado o ya está activo.");
+                    else sendMessage(exchange, 200, "Paciente reactivado correctamente.");
+                } else {
+                    boolean changed = deactivatePatientAndPendingAppointments(targetPatientId);
+                    if (!changed) sendError(exchange, 404, "Paciente no encontrado o ya inactivo.");
+                    else sendMessage(exchange, 200, "Paciente desactivado; sus antecedentes se conservan y sus citas pendientes fueron canceladas.");
+                }
             } else if (segments.length == 3 && "antecedentes".equals(segments[2]) && "GET".equals(method)) {
                 sendJson(exchange, 200, serializeAntecedents(historyManagement.listarPorPaciente(associatedPatient.getId())));
             } else if (segments.length == 3 && "antecedentes".equals(segments[2]) && "POST".equals(method)) {
@@ -1742,6 +1856,33 @@ public final class SeniorManageApiServer {
             else sendJson(exchange, 200, serializeAssignments(assignmentManagement.historial(patientId)));
         }
     }
+    private boolean deactivatePatientAndPendingAppointments(UUID patientId) {
+        try (Connection c = jdbcConnections.open()) {
+            c.setAutoCommit(false);
+            try {
+                boolean deactivated;
+                try (PreparedStatement p = c.prepareStatement("UPDATE pacientes SET activo = FALSE WHERE id = ? AND activo = TRUE")) {
+                    p.setObject(1, patientId);
+                    deactivated = p.executeUpdate() == 1;
+                }
+                if (deactivated) {
+                    try (PreparedStatement q = c.prepareStatement(
+                            "UPDATE citas SET estado = 'CANCELADA' WHERE paciente_id = ? AND estado IN ('PROGRAMADA', 'EN_PROGRESO')")) {
+                        q.setObject(1, patientId);
+                        q.executeUpdate();
+                    }
+                }
+                c.commit();
+                return deactivated;
+            } catch (SQLException | RuntimeException failure) {
+                try { c.rollback(); } catch (SQLException rollback) { failure.addSuppressed(rollback); }
+                throw failure;
+            }
+        } catch (SQLException e) {
+            throw new PersistenceException("No se pudo desactivar el paciente y cancelar sus citas pendientes.", e);
+        }
+    }
+
     private LocalDate optionalDate(String value) {
         if (value == null || value.isBlank()) return null;
         try { return LocalDate.parse(value.trim()); }
@@ -1861,6 +2002,7 @@ public final class SeniorManageApiServer {
             String path = exchange.getRequestURI().getRawPath();
             boolean allowedPath = "/api/auth/me".equals(path)
                 || "/api/auth/change-password".equals(path)
+                || "/api/auth/refresh".equals(path)
                 || "/api/auth/logout".equals(path);
             if (!allowedPath) {
                 sendError(exchange, 403, "Debes cambiar tu contrasena antes de continuar.");

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, type FormEvent } from 'react';
-import { restoreSession, signIn, signOut } from '../../application/managementService';
+import { getTokenWindow, refreshSession, restoreSession, signIn, signOut } from '../../application/managementService';
 import type { AccountRole, AuthenticatedUser } from '../../domain/models/management';
 import { AdminMenu } from '../pages/AdminMenu';
 import { AdminAppointmentsPage } from '../pages/AdminAppointmentsPage';
@@ -76,9 +76,59 @@ export const AppRouter: React.FC = () => {
         window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
     }, [selectedRole]);
 
+    useEffect(() => {
+        if (!session) return;
+        let active = true;
+        let lastActivityCheck = 0;
+
+        const maybeRefresh = () => {
+            const win = getTokenWindow();
+            if (!win || win.remainingMs <= 0) return;
+            const thresholdMs = Math.min(15 * 60 * 1000, Math.floor(win.lifetimeMs / 3));
+            if (win.remainingMs <= thresholdMs) {
+                void refreshSession()
+                    .then((updated) => {
+                        if (active && updated) {
+                            setSession({
+                                email: updated.email,
+                                name: updated.name,
+                                role: updated.role,
+                                mustChangePassword: updated.mustChangePassword,
+                            });
+                        }
+                    })
+                    .catch(() => {
+                        // A 401 response dispatches senior-manage:session-expired cleanly.
+                    });
+            }
+        };
+
+        const handleActivity = () => {
+            const now = Date.now();
+            if (now - lastActivityCheck < 60_000) return;
+            lastActivityCheck = now;
+            maybeRefresh();
+        };
+
+        const interval = window.setInterval(maybeRefresh, 60_000);
+        window.addEventListener('pointerdown', handleActivity);
+        window.addEventListener('keydown', handleActivity);
+        return () => {
+            active = false;
+            window.clearInterval(interval);
+            window.removeEventListener('pointerdown', handleActivity);
+            window.removeEventListener('keydown', handleActivity);
+        };
+    }, [session?.email]);
+
     const handleSignIn = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         if (!selectedRole) {
+            return;
+        }
+        const normalizedEmail = email.trim();
+        if (!normalizedEmail || !password.trim()) {
+            setLoginError('Completa todos los campos obligatorios (*): correo electrónico y contraseña.');
             return;
         }
 
@@ -86,7 +136,7 @@ export const AppRouter: React.FC = () => {
         setLoginError('');
         setSessionNotice('');
         try {
-            const authenticatedUser = await signIn(email.trim(), password);
+            const authenticatedUser = await signIn(normalizedEmail, password);
             if (authenticatedUser.role !== selectedRole) {
                 await signOut();
                 setLoginError('El rol de esta cuenta no coincide con el perfil seleccionado. Elige el perfil correcto e intenta de nuevo.');
@@ -263,10 +313,11 @@ export const AppRouter: React.FC = () => {
                                 </div>
 
                                 {selectedRole ? (
-                                    <form onSubmit={handleSignIn} className="space-y-4">
+                                    <form noValidate onSubmit={handleSignIn} className="space-y-4">
+                                        <p className="text-[11px] text-gray-500">Los campos marcados con * son obligatorios.</p>
                                         {loginError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">{loginError}</p>}
                                         <label className="block space-y-1.5 text-xs font-semibold text-gray-700">
-                                            Correo electrónico
+                                            Correo electrónico *
                                             <input
                                                 type="email"
                                                 required
@@ -280,7 +331,7 @@ export const AppRouter: React.FC = () => {
                                             />
                                         </label>
                                         <label className="block space-y-1.5 text-xs font-semibold text-gray-700">
-                                            Contraseña
+                                            Contraseña *
                                             <input
                                                 type="password"
                                                 required
