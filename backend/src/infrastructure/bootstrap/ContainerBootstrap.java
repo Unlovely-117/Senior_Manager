@@ -49,7 +49,7 @@ public final class ContainerBootstrap {
         System.out.println("ContainerBootstrap: conexión a PostgreSQL disponible.");
 
         runMigrations(configuration);
-        System.out.println("ContainerBootstrap: migraciones Flyway V1-V6 aplicadas/verificadas.");
+        System.out.println("ContainerBootstrap: migraciones Flyway V1-V7 aplicadas/verificadas.");
 
         String initialAdminEmail = trimToNull(System.getenv("SENIOR_MANAGE_INITIAL_ADMIN_EMAIL"));
         String initialAdminPassword = trimToNull(System.getenv("SENIOR_MANAGE_INITIAL_ADMIN_PASSWORD"));

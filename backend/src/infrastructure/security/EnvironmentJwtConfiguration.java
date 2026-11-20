@@ -8,6 +8,10 @@ import javax.crypto.spec.SecretKeySpec;
 
 /** Strict external HS256 configuration. No development key or claim defaults are provided. */
 public final class EnvironmentJwtConfiguration implements JwtConfiguration {
+    private static final long DEFAULT_LIFETIME_MINUTES = 60L;
+    private static final long MIN_LIFETIME_MINUTES = 15L;
+    private static final long MAX_LIFETIME_MINUTES = 480L;
+
     private final String currentSecret = System.getenv("SENIOR_MANAGE_JWT_SECRET");
     private final String currentKeyId = System.getenv("SENIOR_MANAGE_JWT_KEY_ID");
     private final String previousSecret = System.getenv("SENIOR_MANAGE_JWT_PREVIOUS_SECRET");
@@ -17,7 +21,7 @@ public final class EnvironmentJwtConfiguration implements JwtConfiguration {
 
     @Override public SecretKey getSigningKey() { return key(currentSecret, "SENIOR_MANAGE_JWT_SECRET"); }
     @Override public String getSigningAlgorithm() { return "HS256"; }
-    @Override public Duration getTokenLifetime() { return Duration.ofMinutes(15); }
+    @Override public Duration getTokenLifetime() { return Duration.ofMinutes(resolveLifetimeMinutes()); }
     @Override public String getIssuer() { return required(issuer, "SENIOR_MANAGE_JWT_ISSUER"); }
     @Override public String getAudience() { return required(audience, "SENIOR_MANAGE_JWT_AUDIENCE"); }
     @Override public String getSigningKeyId() { return required(currentKeyId, "SENIOR_MANAGE_JWT_KEY_ID"); }
@@ -29,7 +33,7 @@ public final class EnvironmentJwtConfiguration implements JwtConfiguration {
     }
 
     public void validateForStartup() {
-        getSigningKey(); getSigningKeyId(); getIssuer(); getAudience();
+        getSigningKey(); getSigningKeyId(); getIssuer(); getAudience(); getTokenLifetime();
         if ((previousSecret == null) != (previousKeyId == null))
             throw new IllegalStateException("Configure juntas SENIOR_MANAGE_JWT_PREVIOUS_SECRET y SENIOR_MANAGE_JWT_PREVIOUS_KEY_ID, o retire ambas.");
         if (previousKeyId != null && previousKeyId.equals(currentKeyId))
@@ -52,5 +56,23 @@ public final class EnvironmentJwtConfiguration implements JwtConfiguration {
     private static String required(String value, String variable) {
         if (value == null || value.isBlank()) throw new IllegalStateException("Falta la configuración externa " + variable + ".");
         return value;
+    }
+
+    private static long resolveLifetimeMinutes() {
+        String configured = System.getenv("SENIOR_MANAGE_JWT_LIFETIME_MINUTES");
+        if (configured == null || configured.isBlank()) {
+            return DEFAULT_LIFETIME_MINUTES;
+        }
+        try {
+            long minutes = Long.parseLong(configured.trim());
+            if (minutes < MIN_LIFETIME_MINUTES || minutes > MAX_LIFETIME_MINUTES) {
+                throw new IllegalStateException(
+                    "SENIOR_MANAGE_JWT_LIFETIME_MINUTES debe estar entre " + MIN_LIFETIME_MINUTES + " y " + MAX_LIFETIME_MINUTES + " minutos."
+                );
+            }
+            return minutes;
+        } catch (NumberFormatException invalid) {
+            throw new IllegalStateException("SENIOR_MANAGE_JWT_LIFETIME_MINUTES debe ser un número entero.", invalid);
+        }
     }
 }

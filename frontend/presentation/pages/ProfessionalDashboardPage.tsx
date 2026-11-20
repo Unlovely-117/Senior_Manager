@@ -38,7 +38,7 @@ export const ProfessionalDashboardPage: FC<ProfessionalDashboardPageProps> = ({ 
 
     const activePlans = useMemo(() => plans.filter((plan) => plan.active), [plans]);
     const scheduledAppointments = useMemo(
-        () => appointments.filter((item) => item.notes === 'PROGRAMADA'),
+        () => appointments.filter((item) => item.notes === 'PROGRAMADA' || item.notes === 'EN_PROGRESO'),
         [appointments],
     );
     const patientsWithRoutines = useMemo(
@@ -164,11 +164,13 @@ export const ProfessionalDashboardPage: FC<ProfessionalDashboardPageProps> = ({ 
                                         <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                                             appointment.notes === 'PROGRAMADA'
                                                 ? 'bg-cyan-50 text-cyan-800'
-                                                : appointment.notes === 'COMPLETADA'
-                                                    ? 'bg-emerald-50 text-emerald-700'
-                                                    : 'bg-slate-100 text-slate-600'
+                                                : appointment.notes === 'EN_PROGRESO'
+                                                    ? 'bg-amber-50 text-amber-800'
+                                                    : appointment.notes === 'COMPLETADA'
+                                                        ? 'bg-emerald-50 text-emerald-700'
+                                                        : 'bg-slate-100 text-slate-600'
                                         }`}>
-                                            {appointment.notes}
+                                            {appointment.notes === 'EN_PROGRESO' ? 'EN PROGRESO' : appointment.notes}
                                         </span>
                                     </div>
                                     <p className="mt-0.5 truncate text-xs text-slate-600">{appointment.item}</p>

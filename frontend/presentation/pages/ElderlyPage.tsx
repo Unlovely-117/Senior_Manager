@@ -11,6 +11,7 @@ import {
     listPatientHistory,
     listPatients,
     listHistoricalPatients,
+    reactivatePatient,
     updatePatient,
     updatePatientHistory,
 } from '../../application/managementService';
@@ -258,20 +259,33 @@ export const ElderlyPage: FC<Props> = ({ isAdmin = false }) => {
     };
 
     const deactivate = async (patient: Patient) => {
-        if (!window.confirm(`¿Desactivar a ${patient.fullName}? Sus antecedentes se conservarán.`)) return;
+        if (!window.confirm(`¿Desactivar a ${patient.fullName}? Sus antecedentes se conservarán y sus citas pendientes serán canceladas.`)) return;
         setError(''); setNotice('');
-        try { await deactivatePatient(patient.id); setNotice('Paciente desactivado; sus antecedentes se conservaron.'); await reload(); }
+        try { await deactivatePatient(patient.id); setNotice('Paciente desactivado; sus antecedentes se conservaron y sus citas pendientes fueron canceladas.'); await reload(); }
         catch (cause) { setError(cause instanceof Error ? cause.message : 'No fue posible desactivar el paciente.'); }
+    };
+
+    const reactivate = async (patient: Patient) => {
+        if (!window.confirm(`¿Reactivar a ${patient.fullName}? Volverá a aparecer en la lista de pacientes activos.`)) return;
+        setError(''); setNotice('');
+        try { await reactivatePatient(patient.id); setNotice('Paciente reactivado correctamente.'); await reload(); }
+        catch (cause) { setError(cause instanceof Error ? cause.message : 'No fue posible reactivar el paciente.'); }
     };
 
     const submitHistory = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         if (!selected) return;
+        const type = historyType.trim();
+        const description = historyDescription.trim();
+        if (!type || !description || !historyDate) {
+            setHistoryError('Completa todos los campos obligatorios (*): tipo, descripción y fecha.');
+            return;
+        }
         setSaving(true);
         setHistoryError('');
         setHistoryNotice('');
         try {
-            const payload = { type: historyType.trim(), description: historyDescription.trim(), date: historyDate };
+            const payload = { type, description, date: historyDate };
             if (editingHistoryId) {
                 await updatePatientHistory(editingHistoryId, payload);
                 setHistoryNotice('Antecedente actualizado.');
@@ -327,10 +341,11 @@ export const ElderlyPage: FC<Props> = ({ isAdmin = false }) => {
                                 <span className="block font-semibold text-gray-900">{patient.fullName}</span>
                                 <span className="text-sm text-gray-500">Documento: {patient.document} · {patient.active ? 'Activo' : 'Inactivo'}</span>
                             </button>
-                            <div className="flex gap-2">
+                            <div className="flex flex-wrap gap-2">
                                 <button type="button" className="rounded-lg border px-3 py-2 text-sm font-medium text-[#0d7377] hover:bg-teal-50" onClick={() => { setSelected(patient); setEditing(false); }}>Abrir ficha</button>
                                 {patient.active && canUpdatePatient && <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => beginEdit(patient)}>Editar</button>}
-                                {isAdmin && patient.active && <button type="button" className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-700" onClick={() => void deactivate(patient)}>Desactivar</button>}
+                                {isAdmin && patient.active && <button type="button" className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-700 hover:bg-red-50" onClick={() => void deactivate(patient)}>Desactivar</button>}
+                                {isAdmin && !patient.active && <button type="button" className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100" onClick={() => void reactivate(patient)}>Reactivar</button>}
                             </div>
                         </article>
                     ))}
@@ -339,7 +354,10 @@ export const ElderlyPage: FC<Props> = ({ isAdmin = false }) => {
                 <div className="space-y-6">
                     {showPatientForm ? (
                         <form noValidate onSubmit={(event) => void submitPatient(event)} className="space-y-3 rounded-xl border border-gray-200 bg-white p-5">
-                            <h2 className="text-lg font-semibold">{editing ? 'Actualizar paciente' : 'Registrar paciente'}</h2>
+                            <div>
+                                <h2 className="text-lg font-semibold">{editing ? 'Actualizar paciente' : 'Registrar paciente'}</h2>
+                                <p className="mt-1 text-xs text-gray-500">Los campos marcados con * son obligatorios.</p>
+                            </div>
                             <label className="block space-y-1 text-xs font-semibold text-gray-700">
                                 Nombres completos *
                                 <input name="fullName" required placeholder="Nombres completos" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} className="w-full rounded-lg border p-2 text-sm font-normal" />
@@ -425,15 +443,27 @@ export const ElderlyPage: FC<Props> = ({ isAdmin = false }) => {
                                 </p>
                             )}
                             {showHistoryForm && (
-                                <form onSubmit={(event) => void submitHistory(event)} className="space-y-2 border-t pt-4">
-                                    <h4 className="font-medium">{editingHistoryId ? 'Actualizar antecedente' : 'Agregar antecedente'}</h4>
-                                    <input required placeholder="Tipo" value={historyType} onChange={(e) => setHistoryType(e.target.value)} className="w-full rounded-lg border p-2" />
-                                    <textarea required placeholder="Descripción" value={historyDescription} onChange={(e) => setHistoryDescription(e.target.value)} className="w-full rounded-lg border p-2" />
-                                    <input required type="date" value={historyDate} onChange={(e) => setHistoryDate(e.target.value)} className="w-full rounded-lg border p-2" />
+                                <form noValidate onSubmit={(event) => void submitHistory(event)} className="space-y-3 border-t pt-4">
+                                    <div>
+                                        <h4 className="font-medium">{editingHistoryId ? 'Actualizar antecedente' : 'Agregar antecedente'}</h4>
+                                        <p className="mt-0.5 text-xs text-gray-500">Los campos marcados con * son obligatorios.</p>
+                                    </div>
+                                    <label className="block space-y-1 text-xs font-semibold text-gray-700">
+                                        Tipo de antecedente *
+                                        <input required placeholder="Ej.: Hipertensión, Fractura, Alergia" value={historyType} onChange={(e) => setHistoryType(e.target.value)} className="w-full rounded-lg border p-2 text-sm font-normal" />
+                                    </label>
+                                    <label className="block space-y-1 text-xs font-semibold text-gray-700">
+                                        Descripción *
+                                        <textarea required placeholder="Detalles clínicos relevantes" value={historyDescription} onChange={(e) => setHistoryDescription(e.target.value)} className="w-full rounded-lg border p-2 text-sm font-normal" />
+                                    </label>
+                                    <label className="block space-y-1 text-xs font-semibold text-gray-700">
+                                        Fecha *
+                                        <input required type="date" value={historyDate} onChange={(e) => setHistoryDate(e.target.value)} className="w-full rounded-lg border p-2 text-sm font-normal" />
+                                    </label>
                                     <div className="flex gap-2">
-                                        <button disabled={saving} className="rounded-lg border px-4 py-2 disabled:opacity-50">{editingHistoryId ? 'Guardar cambios' : 'Guardar antecedente'}</button>
+                                        <button disabled={saving} className="rounded-lg bg-[#0d7377] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{editingHistoryId ? 'Guardar cambios' : 'Guardar antecedente'}</button>
                                         {editingHistoryId && (
-                                            <button type="button" className="rounded-lg border px-4 py-2" onClick={() => { setEditingHistoryId(null); setHistoryType(''); setHistoryDescription(''); setHistoryDate(''); }}>
+                                            <button type="button" className="rounded-lg border px-4 py-2 text-sm" onClick={() => { setEditingHistoryId(null); setHistoryType(''); setHistoryDescription(''); setHistoryDate(''); }}>
                                                 Cancelar
                                             </button>
                                         )}
@@ -494,7 +524,17 @@ export const ElderlyPage: FC<Props> = ({ isAdmin = false }) => {
                                                     <li key={appointment.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs">
                                                         <div className="flex flex-wrap items-center justify-between gap-2">
                                                             <span className="font-semibold text-slate-800">{appointment.item}</span>
-                                                            <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-600">{appointment.notes}</span>
+                                                            <span className={`rounded-full px-2 py-0.5 font-semibold ${
+                                                                appointment.notes === 'EN_PROGRESO'
+                                                                    ? 'bg-amber-50 text-amber-800'
+                                                                    : appointment.notes === 'COMPLETADA'
+                                                                        ? 'bg-emerald-50 text-emerald-700'
+                                                                        : appointment.notes === 'CANCELADA'
+                                                                            ? 'bg-slate-200 text-slate-600'
+                                                                            : 'bg-cyan-50 text-cyan-800'
+                                                            }`}>
+                                                                {appointment.notes === 'EN_PROGRESO' ? 'EN PROGRESO' : appointment.notes}
+                                                            </span>
                                                         </div>
                                                         <p className="mt-1 text-slate-600">
                                                             {new Date(appointment.date).toLocaleString()}

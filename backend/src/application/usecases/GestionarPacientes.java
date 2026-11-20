@@ -40,4 +40,5 @@ public final class GestionarPacientes {
         return repositorio.actualizar(actualizado);
     }
     public boolean desactivar(UUID id) { return repositorio.desactivar(id); }
+    public boolean activar(UUID id) { return repositorio.activar(id); }
 }

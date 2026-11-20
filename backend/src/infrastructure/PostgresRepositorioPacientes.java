@@ -96,6 +96,11 @@ public final class PostgresRepositorioPacientes implements RepositorioPacientes 
             s.setObject(1, id); return s.executeUpdate() == 1;
         } catch (SQLException e) { throw new PersistenceException("No se pudo desactivar el paciente.", e); }
     }
+    @Override public boolean activar(UUID id) {
+        try (Connection c = connections.open(); PreparedStatement s = c.prepareStatement("UPDATE pacientes SET activo = TRUE WHERE id = ? AND activo = FALSE")) {
+            s.setObject(1, id); return s.executeUpdate() == 1;
+        } catch (SQLException e) { throw new PersistenceException("No se pudo reactivar el paciente.", e); }
+    }
     private static void bind(PreparedStatement s, Paciente p) throws SQLException {
         s.setObject(1, p.getId()); s.setString(2, p.getNombreCompleto()); s.setString(3, p.getDocumento());
         if (p.getFechaNacimiento() == null) s.setNull(4, java.sql.Types.DATE); else s.setDate(4, Date.valueOf(p.getFechaNacimiento()));

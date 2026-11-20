@@ -99,3 +99,24 @@ export interface RolePermission {
     operation: string;
     allowed: boolean;
 }
+
+export const PROFESSIONAL_SPECIALTIES: readonly string[] = [
+    'Medicina general',
+    'Geriatría',
+    'Enfermería geriátrica',
+    'Fisioterapia y rehabilitación',
+    'Terapia ocupacional',
+    'Psicología clínica y de la salud',
+    'Nutrición y dietética',
+    'Trabajo social',
+    'Fonoaudiología',
+    'Cuidado integral del adulto mayor',
+];
+
+export function isValidProfessionalSpecialty(value: string): boolean {
+    const trimmed = value.trim();
+    if (trimmed.length < 3 || /\d/.test(trimmed)) {
+        return false;
+    }
+    return /^[\p{L} ,.-]+$/u.test(trimmed);
+}

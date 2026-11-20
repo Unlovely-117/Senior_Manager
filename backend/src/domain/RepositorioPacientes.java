@@ -16,4 +16,5 @@ public interface RepositorioPacientes {
     List<Paciente> listarInactivosAsignadosA(String profesionalEmail);
     boolean actualizar(Paciente paciente);
     boolean desactivar(UUID id);
+    boolean activar(UUID id);
 }

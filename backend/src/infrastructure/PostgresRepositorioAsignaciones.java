@@ -53,6 +53,7 @@ public final class PostgresRepositorioAsignaciones implements RepositorioAsignac
     @Override public void reasignar(UUID patientId, UUID professionalId, String professionalEmail, java.time.LocalDate startDate) {
         String end = "UPDATE asignaciones_profesional_paciente SET estado='FINALIZADA', fecha_fin=? WHERE paciente_id=? AND estado='ACTIVA' AND fecha_fin IS NULL";
         String add = "INSERT INTO asignaciones_profesional_paciente (id, paciente_id, profesional_id, profesional_email, estado, fecha_inicio, fecha_fin) VALUES (?, ?, ?, ?, 'ACTIVA', ?, NULL)";
+        String transferAppointments = "UPDATE citas SET profesional_id=? WHERE paciente_id=? AND estado IN ('PROGRAMADA', 'EN_PROGRESO')";
         try (Connection c = connections.open()) {
             c.setAutoCommit(false);
             try {
@@ -62,6 +63,11 @@ public final class PostgresRepositorioAsignaciones implements RepositorioAsignac
                     s.setObject(3, professionalId);
                     s.setString(4, professionalEmail.trim().toLowerCase(java.util.Locale.ROOT));
                     s.setDate(5, Date.valueOf(startDate)); s.executeUpdate();
+                }
+                try (PreparedStatement s = c.prepareStatement(transferAppointments)) {
+                    s.setObject(1, professionalId);
+                    s.setObject(2, patientId);
+                    s.executeUpdate();
                 }
                 c.commit();
             } catch (SQLException | RuntimeException failure) {

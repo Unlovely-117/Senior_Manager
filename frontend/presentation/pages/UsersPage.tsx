@@ -94,12 +94,22 @@ export const UsersPage: FC<UsersPageProps> = ({ currentUserEmail }) => {
 
     const saveUser = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
-        setIsSaving(true);
         setFormError('');
         setRequestError('');
+
+        const name = draft.name.trim();
+        const email = draft.email.trim().toLocaleLowerCase();
+        if (!name || !email || (editingEmail === null && !draft.password)) {
+            setFormError('Completa todos los campos obligatorios (*) antes de guardar.');
+            return;
+        }
+        if ((editingEmail === null || draft.password) && draft.password.length < 8) {
+            setFormError('La contraseña debe tener al menos 8 caracteres.');
+            return;
+        }
+
+        setIsSaving(true);
         try {
-            const name = draft.name.trim();
-            const email = draft.email.trim().toLocaleLowerCase();
             if (editingEmail === null) {
                 await createUser({ name, email, role: draft.role, password: draft.password });
                 setNotice('La cuenta se creó correctamente.');
@@ -199,24 +209,25 @@ export const UsersPage: FC<UsersPageProps> = ({ currentUserEmail }) => {
             )}
 
             {isFormOpen && (
-                <form onSubmit={saveUser} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-6">
+                <form noValidate onSubmit={saveUser} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-6">
                     <div className="mb-5 flex items-center justify-between">
                         <div>
                             <p className="text-xs font-bold uppercase tracking-wider text-[#0d7377]">Cuentas de acceso</p>
                             <h2 className="mt-1 text-lg font-bold text-[#102a36]">{editingEmail === null ? 'Crear usuario' : 'Editar usuario'}</h2>
+                            <p className="mt-1 text-xs text-gray-500">Los campos marcados con * son obligatorios.</p>
                         </div>
                         <button type="button" onClick={() => setIsFormOpen(false)} className="rounded-lg px-3 py-2 text-sm text-gray-500 hover:bg-gray-100">Cancelar</button>
                     </div>
                     {formError && <p role="alert" className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
                     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Nombre completo
+                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Nombre completo *
                             <input required maxLength={100} className={inputClass} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
                         </label>
-                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Correo electrónico
+                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Correo electrónico *
                             <input required type="email" maxLength={120} autoCapitalize="none" spellCheck={false} className={inputClass} value={draft.email} onChange={(event) => setDraft({ ...draft, email: event.target.value.toLowerCase() })} />
                         </label>
                         {editingEmail === null && (
-                            <label className="space-y-1.5 text-xs font-semibold text-gray-600">Contraseña inicial
+                            <label className="space-y-1.5 text-xs font-semibold text-gray-600">Contraseña inicial *
                                 <input required type="password" minLength={8} autoComplete="new-password" className={inputClass} value={draft.password} onChange={(event) => setDraft({ ...draft, password: event.target.value })} />
                             </label>
                         )}
@@ -225,7 +236,7 @@ export const UsersPage: FC<UsersPageProps> = ({ currentUserEmail }) => {
                                 <input type="password" minLength={8} autoComplete="new-password" className={inputClass} value={draft.password} onChange={(event) => setDraft({ ...draft, password: event.target.value })} placeholder="Déjalo vacío para conservarla" />
                             </label>
                         )}
-                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Rol
+                        <label className="space-y-1.5 text-xs font-semibold text-gray-600">Rol *
                             <select className={inputClass} value={draft.role} onChange={(event) => setDraft({ ...draft, role: event.target.value as AccountRole })}>
                                 <option value="professional">Profesional</option>
                                 <option value="admin">Administrador</option>
