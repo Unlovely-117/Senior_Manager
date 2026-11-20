@@ -55,6 +55,12 @@ import java.util.Map;
 import java.util.Set;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -567,6 +573,78 @@ public final class SeniorManageApiServer {
         return value;
     }
 
+    private String validatePersonName(Map<String, String> form, String key) {
+        String value = requiredRecordField(form, key);
+        if (value.length() < 3 || value.length() > 100 || !value.matches("^[\\p{L} ]+$")) {
+            throw new IllegalArgumentException(
+                "El nombre completo solo debe contener letras y espacios (entre 3 y 100 caracteres, sin números).");
+        }
+        return value;
+    }
+
+    private String validateAppointmentDateTime(String rawDate) {
+        if (rawDate == null || rawDate.isBlank()) {
+            throw new IllegalArgumentException("La fecha y hora de la cita son obligatorias.");
+        }
+        String trimmed = rawDate.trim();
+        ZoneId businessZone = ZoneId.of("America/Bogota");
+        ZonedDateTime localZoned;
+        try {
+            if (trimmed.endsWith("Z") || trimmed.matches(".*[+-]\\d{2}:?\\d{2}$")) {
+                OffsetDateTime odt = OffsetDateTime.parse(trimmed);
+                localZoned = ZoneOffset.UTC.equals(odt.getOffset())
+                    ? odt.atZoneSameInstant(businessZone)
+                    : odt.toZonedDateTime();
+            } else {
+                localZoned = LocalDateTime.parse(trimmed).atZone(businessZone);
+            }
+        } catch (DateTimeParseException invalid) {
+            throw new IllegalArgumentException("La fecha y hora de la cita no tienen un formato válido.");
+        }
+        if (localZoned.toInstant().isBefore(Instant.now().minusSeconds(60))) {
+            throw new IllegalArgumentException(
+                "No se pueden programar citas en días u horas pasadas. Selecciona el día actual o una fecha posterior.");
+        }
+        LocalTime time = localZoned.toLocalTime();
+        if (time.isBefore(LocalTime.of(7, 0)) || time.isAfter(LocalTime.of(20, 0))) {
+            throw new IllegalArgumentException("El horario de la cita debe estar entre las 7:00 a. m. y las 8:00 p. m.");
+        }
+        return localZoned.toOffsetDateTime().toString();
+    }
+
+    private boolean professionalHasAppointmentConflict(UUID professionalId, String isoDateTime, UUID excludeAppointmentId) {
+        String sql = "SELECT EXISTS (SELECT 1 FROM citas WHERE profesional_id = ? "
+            + "AND estado IN ('PROGRAMADA', 'EN_PROGRESO') "
+            + "AND date_trunc('minute', fecha_hora) = date_trunc('minute', ?::timestamptz) "
+            + "AND (?::uuid IS NULL OR id <> ?::uuid))";
+        try (Connection c = jdbcConnections.open(); PreparedStatement q = c.prepareStatement(sql)) {
+            q.setObject(1, professionalId);
+            q.setString(2, isoDateTime);
+            q.setObject(3, excludeAppointmentId);
+            q.setObject(4, excludeAppointmentId);
+            try (ResultSet r = q.executeQuery()) {
+                return r.next() && r.getBoolean(1);
+            }
+        } catch (SQLException e) {
+            throw new PersistenceException("No se pudo verificar la disponibilidad del profesional.", e);
+        }
+    }
+
+    private boolean professionalHasOpenAppointments(UUID professionalId) {
+        if (professionalId == null) {
+            return false;
+        }
+        String sql = "SELECT EXISTS (SELECT 1 FROM citas WHERE profesional_id = ? AND estado IN ('PROGRAMADA', 'EN_PROGRESO'))";
+        try (Connection c = jdbcConnections.open(); PreparedStatement q = c.prepareStatement(sql)) {
+            q.setObject(1, professionalId);
+            try (ResultSet r = q.executeQuery()) {
+                return r.next() && r.getBoolean(1);
+            }
+        } catch (SQLException e) {
+            throw new PersistenceException("No se pudieron verificar las citas asignadas al profesional.", e);
+        }
+    }
+
     private String serializeMyProfessionalProfile(Usuario account, Profesional profile) {
         return "{\"exists\":" + (profile != null)
             + ",\"name\":" + json(account.getNombre())
@@ -652,7 +730,7 @@ public final class SeniorManageApiServer {
                 sendJson(exchange, 200, serializeProfessional(existing));
             } else if (segments.length == 2 && "PUT".equals(method)) {
                 Map<String, String> form = readForm(exchange);
-                String name = requiredRecordField(form, "name");
+                String name = validatePersonName(form, "name");
                 String requestedEmail = requiredRecordField(form, "email");
                 String email = requestedEmail.equalsIgnoreCase(existing.getCorreo())
                     ? existing.getCorreo()
@@ -737,6 +815,10 @@ public final class SeniorManageApiServer {
                 sendMessage(exchange, 200, "Revisión de ficha guardada.");
             } else if (segments.length == 3 && "estado".equals(segments[2]) && "PATCH".equals(method)) {
                 boolean active = parseBoolean(required(readForm(exchange), "active"));
+                if (!active && professionalHasOpenAppointments(existing.getId())) {
+                    sendError(exchange, 409, "No se puede desactivar al profesional porque tiene citas asignadas pendientes o en progreso. Finaliza, cancela o reasigna sus citas primero.");
+                    return;
+                }
                 Usuario linkedAccount = users.buscarUsuarioPorCorreo(existing.getCorreo());
                 if (linkedAccount != null && linkedAccount.getRol() == Rol.PROFESIONAL) {
                     boolean changed = active
@@ -907,7 +989,7 @@ public final class SeniorManageApiServer {
         }
         if (segments.length == 1 && "POST".equals(method)) {
             Map<String, String> form = readForm(exchange);
-            String name = requiredRecordField(form, "name");
+            String name = validatePersonName(form, "name");
             String email = validateEmail(requiredRecordField(form, "email"));
             String password = required(form, "password");
             if (password.length() < 8 || password.length() > MAX_PASSWORD_LENGTH) {
@@ -932,7 +1014,7 @@ public final class SeniorManageApiServer {
                 sendJson(exchange, 200, serializeUser(existing));
             } else if (segments.length == 2 && "PUT".equals(method)) {
                 Map<String, String> form = readForm(exchange);
-                String name = requiredRecordField(form, "name");
+                String name = validatePersonName(form, "name");
                 String newEmail = validateEmail(requiredRecordField(form, "email"));
                 String previousEmail = existing.getCorreo();
                 users.actualizarUsuario(email, name, newEmail);
@@ -984,6 +1066,13 @@ public final class SeniorManageApiServer {
                 if (wouldRemoveLastActiveAdministrator(existing, existing.getRol(), active)) {
                     sendError(exchange, 409, "Debe permanecer al menos un administrador activo.");
                     return;
+                }
+                if (!active && existing.getRol() == Rol.PROFESIONAL) {
+                    Profesional linkedProfile = findProfessionalProfileByAccount(existing);
+                    if (linkedProfile != null && professionalHasOpenAppointments(linkedProfile.getId())) {
+                        sendError(exchange, 409, "No se puede desactivar la cuenta del profesional porque tiene citas asignadas pendientes o en progreso. Finaliza, cancela o reasigna sus citas primero.");
+                        return;
+                    }
                 }
                 boolean changed = active ? users.activarUsuario(email) : users.desactivarUsuario(email);
                 if (!changed) {
@@ -1173,9 +1262,15 @@ public final class SeniorManageApiServer {
             if (appointments) {
                 if (!activePatient(patientId)) { sendError(exchange,409,"No se pueden agendar citas para un paciente inactivo."); return; }
                 if (professionalId == null || professionalId.isBlank()) { sendError(exchange,400,"Selecciona un profesional."); return; }
-                if (session.role == Rol.ADMINISTRADOR && !isActiveAssignment(patientId, UUID.fromString(professionalId))) { sendError(exchange,400,"La cita requiere un paciente activo asignado a un profesional activo."); return; }
+                UUID profUuid = UUID.fromString(professionalId);
+                if (session.role == Rol.ADMINISTRADOR && !isActiveAssignment(patientId, profUuid)) { sendError(exchange,400,"La cita requiere un paciente activo asignado a un profesional activo."); return; }
+                String validatedDate = validateAppointmentDateTime(required(form, "date"));
+                if (professionalHasAppointmentConflict(profUuid, validatedDate, null)) {
+                    sendError(exchange, 409, "El profesional seleccionado ya tiene una cita asignada en ese mismo día y hora. Selecciona un horario en el que esté libre.");
+                    return;
+                }
                 String sql="INSERT INTO citas(id,paciente_id,profesional_id,fecha_hora,motivo,creado_por) VALUES(?,?,?,?::timestamptz,?,?) RETURNING id";
-                try(Connection c=jdbcConnections.open();PreparedStatement q=c.prepareStatement(sql)){q.setObject(1,UUID.randomUUID());q.setObject(2,patientId);q.setObject(3,UUID.fromString(professionalId));q.setString(4,required(form,"date"));q.setString(5,required(form,"item"));q.setObject(6,actor);q.executeQuery().close();sendMessage(exchange,201,"Cita creada.");}
+                try(Connection c=jdbcConnections.open();PreparedStatement q=c.prepareStatement(sql)){q.setObject(1,UUID.randomUUID());q.setObject(2,patientId);q.setObject(3,profUuid);q.setString(4,validatedDate);q.setString(5,required(form,"item"));q.setObject(6,actor);q.executeQuery().close();sendMessage(exchange,201,"Cita creada.");}
                 catch(SQLException e){throw new PersistenceException("No se pudo crear la cita.",e);}
             } else {
                 String sql="INSERT INTO seguimientos_ejercicios(id,paciente_id,ejercicio,notas,registrado_por) VALUES(?,?,?,?,?)";
@@ -1192,11 +1287,12 @@ public final class SeniorManageApiServer {
                     sendError(exchange, 400, "Estado de cita no válido.");
                     return;
                 }
-                String checkSql = "SELECT c.estado, p.activo FROM citas c JOIN pacientes p ON p.id = c.paciente_id "
+                String checkSql = "SELECT c.estado, p.activo, c.profesional_id FROM citas c JOIN pacientes p ON p.id = c.paciente_id "
                     + "WHERE c.id = ? AND (? = 'ADMINISTRADOR' OR EXISTS(SELECT 1 FROM asignaciones_profesional_paciente a JOIN profesionales pr ON pr.id=a.profesional_id JOIN usuarios u ON u.id=pr.usuario_id WHERE a.paciente_id=c.paciente_id AND a.profesional_id=c.profesional_id AND pr.activo AND u.activo AND lower(trim(u.correo))=lower(trim(?)) AND a.estado='ACTIVA' AND a.fecha_fin IS NULL))";
                 try (Connection c = jdbcConnections.open()) {
                     String currentStatus;
                     boolean patientActive;
+                    UUID currentProfessionalId;
                     try (PreparedStatement check = c.prepareStatement(checkSql)) {
                         check.setObject(1, id);
                         check.setString(2, session.role.name());
@@ -1208,6 +1304,7 @@ public final class SeniorManageApiServer {
                             }
                             currentStatus = rs.getString(1);
                             patientActive = rs.getBoolean(2);
+                            currentProfessionalId = rs.getObject(3, UUID.class);
                         }
                     }
                     if (!patientActive) {
@@ -1222,9 +1319,18 @@ public final class SeniorManageApiServer {
                         sendError(exchange, 409, "Una cita en progreso no puede volver a estado programada.");
                         return;
                     }
+                    String rawDateUpdate = form.get("date");
+                    String validatedDateUpdate = null;
+                    if (rawDateUpdate != null && !rawDateUpdate.isBlank()) {
+                        validatedDateUpdate = validateAppointmentDateTime(rawDateUpdate);
+                        if (professionalHasAppointmentConflict(currentProfessionalId, validatedDateUpdate, id)) {
+                            sendError(exchange, 409, "El profesional ya tiene otra cita asignada en ese mismo día y hora.");
+                            return;
+                        }
+                    }
                     String updateSql = "UPDATE citas SET fecha_hora=COALESCE(?::timestamptz,fecha_hora), motivo=COALESCE(?,motivo), estado=COALESCE(?,estado) WHERE id=?";
                     try (PreparedStatement q = c.prepareStatement(updateSql)) {
-                        q.setString(1, form.get("date"));
+                        q.setString(1, validatedDateUpdate);
                         q.setString(2, form.get("item"));
                         q.setString(3, requestedStatus);
                         q.setObject(4, id);

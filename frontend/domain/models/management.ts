@@ -120,3 +120,11 @@ export function isValidProfessionalSpecialty(value: string): boolean {
     }
     return /^[\p{L} ,.-]+$/u.test(trimmed);
 }
+
+export function isValidPersonName(value: string): boolean {
+    const trimmed = value.trim();
+    if (trimmed.length < 3 || trimmed.length > 100) {
+        return false;
+    }
+    return /^[\p{L} ]+$/u.test(trimmed);
+}

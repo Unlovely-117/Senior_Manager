@@ -15,6 +15,21 @@ type Props = { onNavigate?: (view: string) => void; isAdmin?: boolean };
 
 const inputClass = 'mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-teal-500 focus:bg-white focus:ring-4 focus:ring-teal-500/10';
 
+function formatLocalDateTimeMin(date = new Date()): string {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function toLocalIsoWithOffset(date: Date): string {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const offsetMinutes = -date.getTimezoneOffset();
+    const sign = offsetMinutes >= 0 ? '+' : '-';
+    const absOffset = Math.abs(offsetMinutes);
+    const offsetHours = pad(Math.floor(absOffset / 60));
+    const offsetMins = pad(absOffset % 60);
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:00${sign}${offsetHours}:${offsetMins}`;
+}
+
 function statusMeta(status: string): { label: string; style: string } {
     if (status === 'EN_PROGRESO') return { label: 'En progreso', style: 'border-amber-200 bg-amber-50 text-amber-800' };
     if (status === 'COMPLETADA') return { label: 'Completada', style: 'border-emerald-200 bg-emerald-50 text-emerald-700' };
@@ -120,13 +135,33 @@ export const AdminAppointmentsPage: FC<Props> = ({ isAdmin = true }) => {
             setError('Selecciona una fecha y hora válida.');
             return;
         }
+        if (parsedDate.getTime() < Date.now() - 60_000) {
+            setError('No se pueden programar citas en días u horas pasadas. Selecciona el día actual o una fecha posterior.');
+            return;
+        }
+        const hours = parsedDate.getHours();
+        const minutes = parsedDate.getMinutes();
+        if (hours < 7 || hours > 20 || (hours === 20 && minutes > 0)) {
+            setError('El horario de la cita debe estar entre las 7:00 a. m. y las 8:00 p. m.');
+            return;
+        }
+        const targetMinute = Math.floor(parsedDate.getTime() / 60_000);
+        const hasConflict = items.some((existing) => {
+            if (existing.notes !== 'PROGRAMADA' && existing.notes !== 'EN_PROGRESO') return false;
+            if (isAdmin && existing.professionalId !== professionalId) return false;
+            return Math.floor(new Date(existing.date).getTime() / 60_000) === targetMinute;
+        });
+        if (hasConflict) {
+            setError('El profesional seleccionado ya tiene una cita asignada en ese mismo día y hora. Elige otro horario disponible.');
+            return;
+        }
 
         setSaving(true);
         try {
             await createAppointment({
                 patientId,
                 professionalId: isAdmin ? professionalId : undefined,
-                date: parsedDate.toISOString(),
+                date: toLocalIsoWithOffset(parsedDate),
                 item: reason,
             });
             setNotice('Cita creada y guardada.');
@@ -207,7 +242,8 @@ export const AdminAppointmentsPage: FC<Props> = ({ isAdmin = true }) => {
                     )}
                     <label className="text-sm font-semibold text-slate-700">
                         Fecha y hora *
-                        <input required type="datetime-local" name="date" className={inputClass} />
+                        <input required type="datetime-local" name="date" min={formatLocalDateTimeMin()} className={inputClass} />
+                        <span className="mt-1 block text-xs font-normal text-slate-500">Horario permitido: 7:00 a. m. a 8:00 p. m. (día actual o posterior).</span>
                     </label>
                     <label className="text-sm font-semibold text-slate-700">
                         Motivo *
