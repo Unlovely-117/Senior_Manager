@@ -9,7 +9,7 @@ import {
     updateUser,
 } from '../../application/managementService';
 import { ApiRequestError } from '../../infrastructure/managementApi';
-import type { AccountRole, UserAccount } from '../../domain/models/management';
+import { isValidPersonName, type AccountRole, type UserAccount } from '../../domain/models/management';
 
 type UserForm = {
     name: string;
@@ -101,6 +101,10 @@ export const UsersPage: FC<UsersPageProps> = ({ currentUserEmail }) => {
         const email = draft.email.trim().toLocaleLowerCase();
         if (!name || !email || (editingEmail === null && !draft.password)) {
             setFormError('Completa todos los campos obligatorios (*) antes de guardar.');
+            return;
+        }
+        if (!isValidPersonName(name)) {
+            setFormError('El nombre completo solo debe contener letras y espacios (entre 3 y 100 caracteres, sin números).');
             return;
         }
         if ((editingEmail === null || draft.password) && draft.password.length < 8) {

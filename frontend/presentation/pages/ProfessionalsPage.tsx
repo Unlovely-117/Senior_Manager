@@ -11,6 +11,7 @@ import {
 } from '../../application/managementService';
 import {
     PROFESSIONAL_SPECIALTIES,
+    isValidPersonName,
     isValidProfessionalSpecialty,
     type Professional,
 } from '../../domain/models/management';
@@ -154,6 +155,10 @@ export const ProfessionalsPage: FC = () => {
         }
         if (!isValidProfessionalSpecialty(specialty)) {
             setFormError('Selecciona una profesión o especialidad válida (no puede contener números).');
+            return;
+        }
+        if (editingDocument !== null && !isValidPersonName(name)) {
+            setFormError('El nombre del profesional solo debe contener letras y espacios (sin números).');
             return;
         }
 
